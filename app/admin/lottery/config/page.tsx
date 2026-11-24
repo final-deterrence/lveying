@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { LotteryConfig, LotteryResult } from '@/types';
 import * as XLSX from 'xlsx';
+import { STAGE_STATE_KEY, STAGE_VIEW_KEY } from '@/lib/lotteryStage';
 
 export default function LotteryConfigPage() {
   const [config, setConfig] = useState<LotteryConfig>({
     minNumber: 1,
-    maxNumber: 100,
+    maxNumber: 2000,
     count: 5,
     title: '一等奖',
   });
@@ -79,50 +80,36 @@ export default function LotteryConfigPage() {
 
       if (response.ok) {
         alert('配置已更新！');
+      } else {
+        const data = await response.json();
+        alert(data.error || '更新配置失败');
       }
     } catch (error) {
       console.error('更新配置失败:', error);
     }
   };
 
-  const deleteHistory = async (id: string) => {
-    if (!confirm('确定要删除这条抽奖记录吗？')) return;
-
-    const token = localStorage.getItem('adminToken');
-    if (!token) return;
-
-    try {
-      await fetch('/api/lottery/result', {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ id }),
-      });
-      fetchHistory();
-    } catch (error) {
-      console.error('删除记录失败:', error);
-    }
-  };
-
   const clearAllHistory = async () => {
-    if (!confirm('确定要清空所有抽奖历史吗？此操作不可恢复！')) return;
+    if (!confirm('确定要清空所有抽奖历史并重置中奖号码池吗？之前中奖的号码将可能再次被抽中，此操作不可恢复！')) return;
 
     const token = localStorage.getItem('adminToken');
     if (!token) return;
 
     try {
-      await fetch('/api/lottery/history', {
+      const response = await fetch('/api/lottery/history', {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
+      if (!response.ok) throw new Error('清空抽奖历史失败');
+      localStorage.removeItem(STAGE_STATE_KEY);
+      localStorage.removeItem(STAGE_VIEW_KEY);
       setHistory([]);
-      alert('抽奖历史已清空！');
+      alert('抽奖历史已清空！请刷新抽奖导播台。');
     } catch (error) {
       console.error('清空历史失败:', error);
+      alert('清空历史失败，请检查登录状态后重试。');
     }
   };
 
@@ -139,6 +126,8 @@ export default function LotteryConfigPage() {
           '奖项': result.title,
           '时间': new Date(result.timestamp).toLocaleString('zh-CN'),
           '数目': result.numbers.length,
+          '状态': result.invalidatedAt ? '已作废' : '有效',
+          '作废原因': result.invalidReason || '',
         };
 
         // 添加中奖序号列，补0至7位
@@ -172,6 +161,8 @@ export default function LotteryConfigPage() {
         { wch: 12 }, // 奖项
         { wch: 20 }, // 时间
         { wch: 8 },  // 数目
+        { wch: 10 }, // 状态
+        { wch: 32 }, // 作废原因
       ];
       
       // 为中奖序号列添加宽度
@@ -224,7 +215,7 @@ export default function LotteryConfigPage() {
                 href="/admin/lottery/display"
                 className="px-6 py-2 backdrop-blur-md bg-white/20 border border-white/30 text-gray-800 rounded-xl hover:bg-white/30 transition-all"
               >
-                打开抽奖界面
+                打开抽奖导播台
               </Link>
               <Link
                 href="/admin/dashboard"
@@ -379,12 +370,8 @@ export default function LotteryConfigPage() {
                         <span className="px-3 py-1 backdrop-blur-md bg-white/30 border border-white/30 text-gray-800 text-sm font-bold rounded-full">
                           {result.title}
                         </span>
-                        <button
-                          onClick={() => deleteHistory(result.id)}
-                          className="text-red-600 hover:text-red-800 text-sm drop-shadow-lg"
-                        >
-                          删除
-                        </button>
+                        {result.invalidatedAt && <span className="text-red-700 font-bold">已作废：{result.invalidReason}</span>}
+
                       </div>
                       <div className="flex flex-wrap gap-2 mb-2">
                         {result.numbers.map((num, idx) => (
@@ -407,7 +394,7 @@ export default function LotteryConfigPage() {
               {history.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-white/20">
                   <p className="text-xs text-gray-600 drop-shadow-md">
-                    提示：导出Excel格式为第1列奖项，第2列时间，第3列数目，第4-N+3列中奖序号（补0至7位）
+                    导出包含中奖状态、作废原因及补零后的号码。
                   </p>
                 </div>
               )}

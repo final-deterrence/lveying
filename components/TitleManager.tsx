@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 export default function TitleManager() {
   useEffect(() => {
     const originalTitle = document.title;
-    const hiddenTitle = '「不要掠过那个瞬间」';
+    const hiddenTitle = '「无间道」';
 
     const handleVisibilityChange = () => {
       if (document.hidden) {

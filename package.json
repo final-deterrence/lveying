@@ -2,11 +2,16 @@
   "name": "lueying-party",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "dev": "next dev -p 8880",
     "build": "node scripts/set-build-time.js && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node --test --test-isolation=none tests/*.test.cjs",
+    "backup:db": "node scripts/backup-db.cjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

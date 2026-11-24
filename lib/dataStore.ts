@@ -1,448 +1,319 @@
-// JSON文件持久化数据存储
-import fs from 'fs';
-import path from 'path';
-import { Program, Danmaku, LotteryConfig, LotteryResult } from '@/types';
+import { randomInt, randomUUID } from 'node:crypto';
+import type { DatabaseSync } from 'node:sqlite';
+import type { Program, Danmaku, LotteryConfig, LotteryResult, DanmakuPage, DanmakuFilter, DanmakuReview } from '../types';
+import { defaultData, type DataStoreState } from './defaultData';
+import { getDatabase, insertProgram, insertDanmaku, normalizeIp, transaction } from './database';
 
-interface DataStoreState {
-  programs: Program[];
-  danmakus: Danmaku[];
-  bannedIps: string[];
-  lotteryConfig: LotteryConfig;
-  lotteryResults: LotteryResult[]; // 改为数组，支持多次抽奖
+type Row = Record<string, unknown>;
+export class LotteryError extends Error {}
+
+export function validateLotteryConfig(config: LotteryConfig): void {
+  if (!Number.isSafeInteger(config.minNumber) || !Number.isSafeInteger(config.maxNumber)
+    || config.minNumber < 0 || config.maxNumber > 9999999 || config.minNumber > config.maxNumber
+    || !Number.isSafeInteger(config.count) || config.count < 1 || config.count > 100
+    || config.count > config.maxNumber - config.minNumber + 1
+    || typeof config.title !== 'string' || !config.title.trim() || config.title.length > 100) {
+    throw new LotteryError('请填写有效的奖项名称、号码范围（0 至 9999999）和人数（1 至 100）');
+  }
 }
 
-class DataStore {
-  private dataFilePath: string;
-  private data: DataStoreState;
-
-  // 默认数据
-  private defaultData: DataStoreState = {
-    programs: [
-      { id: '1', title: '开场舞', performers: [['编导', ['张三', '李四']], ['表演者', ['王五', '赵六']]], band_name: '舞蹈团', order: 1, completed: false },
-      { id: '2', title: '歌曲表演', performers: [['主唱', ['歌手A']]], band_name: null, order: 2, completed: false },
-      { id: '3', title: '小品', performers: [['演员', ['演员甲', '演员乙']], ['编剧', ['编剧A']]], band_name: '喜剧组', order: 3, completed: false },
-      { id: '4', title: '魔术表演', performers: [['魔术师', ['魔术师A']]], band_name: null, order: 4, completed: false },
-      { id: '5', title: '抽奖环节', performers: [['主持人', ['主持人A']]], band_name: null, order: 5, completed: false },
-    ],
-    danmakus: [],
-  bannedIps: [],
-    lotteryConfig: {
-      minNumber: 1,
-      maxNumber: 100,
-      count: 5,
-      title: '一等奖',
-    },
-    lotteryResults: [],
+function programFromRow(row: Row): Program {
+  return {
+    id: String(row.id), title: String(row.title),
+    performers: JSON.parse(String(row.performers)), band_name: row.band_name as string | null,
+    order: Number(row.order_value), completed: Boolean(row.completed),
+    ...(row.parent_id === null ? {} : { parentId: String(row.parent_id) }),
+    ...(row.sub_order === null ? {} : { subOrder: Number(row.sub_order) }),
   };
+}
 
-  constructor() {
-    // 数据文件存储在项目根目录的data文件夹中
-    const dataDir = path.join(process.cwd(), 'data');
-    this.dataFilePath = path.join(dataDir, 'store.json');
+function danmakuFromRow(row: Row): Danmaku {
+  return {
+    id: String(row.id), content: String(row.content), timestamp: Number(row.timestamp), censor: Boolean(row.censor),
+    ...(row.censored_at == null ? {} : { censoredAt: Number(row.censored_at) }),
+    ...(row.ip == null ? {} : { ip: String(row.ip) }),
+    ...(row.review_source == null ? {} : { review: {
+      status: row.review_status as DanmakuReview['status'], source: row.review_source as DanmakuReview['source'], reason: String(row.review_reason),
+    } }),
+  };
+}
 
-    // 确保data目录存在
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
+function reviewWhere(filter: DanmakuFilter | boolean): string {
+  if (filter === true || filter === 'pending') return "WHERE d.censor = 0 AND (r.status IS NULL OR r.status <> 'rejected')";
+  if (filter === 'approved') return 'WHERE d.censor = 1';
+  if (filter === 'rejected') return "WHERE d.censor = 0 AND r.status = 'rejected'";
+  return '';
+}
 
-    // 加载或初始化数据
-    this.data = this.loadData();
-  }
+const reviewColumns = 'd.*, r.status AS review_status, r.source AS review_source, r.reason AS review_reason';
+const reviewJoin = 'FROM danmakus d LEFT JOIN danmaku_reviews r ON r.danmaku_id = d.id';
 
-  // 从JSON文件加载数据
-  private loadData(): DataStoreState {
-    try {
-      if (fs.existsSync(this.dataFilePath)) {
-        const fileContent = fs.readFileSync(this.dataFilePath, 'utf-8');
-        const loadedData = JSON.parse(fileContent);
-        
-        // 数据迁移：处理旧版本的 lotteryResult (单数) -> lotteryResults (复数)
-        if ('lotteryResult' in loadedData && !('lotteryResults' in loadedData)) {
-          console.log('🔄 检测到旧数据格式，正在迁移...');
-          loadedData.lotteryResults = loadedData.lotteryResult ? [loadedData.lotteryResult] : [];
-          delete loadedData.lotteryResult;
-          // 立即保存迁移后的数据
-          fs.writeFileSync(this.dataFilePath, JSON.stringify(loadedData, null, 2), 'utf-8');
-          console.log('✅ 数据迁移完成');
-        }
-        
-        // 确保 lotteryResults 存在
-        if (!loadedData.lotteryResults) {
-          loadedData.lotteryResults = [];
-        }
-        
-        console.log('✅ 从文件加载数据成功');
-        return loadedData;
-      }
-    } catch (error) {
-      console.error('❌ 加载数据文件失败:', error);
-    }
-    
-    // 如果文件不存在或加载失败，使用默认数据并保存
-    console.log('📝 使用默认数据并创建新文件');
-    this.saveData(this.defaultData);
-    return { ...this.defaultData };
-  }
+function resultFromRow(row: Row): LotteryResult {
+  return { id: String(row.id), title: String(row.title), numbers: JSON.parse(String(row.numbers)), timestamp: Number(row.timestamp) };
+}
 
-  // 保存数据到JSON文件（同步写入，确保数据持久化）
-  private saveData(data?: DataStoreState): void {
-    try {
-      const dataToSave = data || this.data;
-      // 使用同步写入确保数据立即持久化
-      fs.writeFileSync(
-        this.dataFilePath,
-        JSON.stringify(dataToSave, null, 2),
-        'utf-8'
-      );
-      console.log('💾 数据已保存到文件');
-    } catch (error) {
-      console.error('❌ 保存数据文件失败:', error);
-      // 如果保存失败，抛出错误以便上层处理
-      throw error;
-    }
-  }
+export class DataStore {
+  private publicCache?: { revision: string; expires: number; items: Danmaku[] };
 
-  // 重新加载数据（从文件读取最新数据）
-  private reloadData(): void {
-    try {
-      if (fs.existsSync(this.dataFilePath)) {
-        const fileContent = fs.readFileSync(this.dataFilePath, 'utf-8');
-        this.data = JSON.parse(fileContent);
-        console.log('🔄 数据已重新加载');
-      }
-    } catch (error) {
-      console.error('❌ 重新加载数据失败:', error);
-    }
-  }
+  constructor(private readonly connection?: DatabaseSync) {}
+  private get db(): DatabaseSync { return this.connection ?? getDatabase(); }
 
-  // 节目单相关方法
   getPrograms(): Program[] {
-    // 从文件重新加载以确保数据最新
-    this.reloadData();
-    return [...this.data.programs].sort((a, b) => {
-      // 先按 order 排序，然后按 parentId 和 subOrder 排序
-      if (a.order !== b.order) {
-        return a.order - b.order;
-      }
-      // 如果是同一个主节目的子节目，按 subOrder 排序
-      if (a.parentId === b.parentId) {
-        return (a.subOrder || 0) - (b.subOrder || 0);
-      }
-      // 主节目排在子节目前面
-      if (!a.parentId && b.parentId) return -1;
-      if (a.parentId && !b.parentId) return 1;
-      return 0;
-    });
+    return this.db.prepare('SELECT * FROM programs ORDER BY order_value, parent_id IS NOT NULL, sub_order, rowid')
+      .all().map(programFromRow);
   }
 
-  // 获取层次化的节目列表（主节目和子节目分组）
   getHierarchicalPrograms(): Program[] {
-    this.reloadData();
-    const allPrograms = [...this.data.programs];
-    const mainPrograms = allPrograms.filter(p => !p.parentId).sort((a, b) => a.order - b.order);
-    const result: Program[] = [];
-
-    mainPrograms.forEach(mainProgram => {
-      result.push(mainProgram);
-      // 添加该主节目的所有子节目
-      const subPrograms = allPrograms
-        .filter(p => p.parentId === mainProgram.id)
-        .sort((a, b) => (a.subOrder || 0) - (b.subOrder || 0));
-      result.push(...subPrograms);
-    });
-
-    return result;
+    const programs = this.getPrograms();
+    return programs.filter(p => !p.parentId).flatMap(parent => [
+      parent, ...programs.filter(p => p.parentId === parent.id).sort((a, b) => (a.subOrder || 0) - (b.subOrder || 0)),
+    ]);
   }
 
   updatePrograms(programs: Program[]): void {
-    this.data.programs = programs;
-    this.saveData();
+    transaction(this.db, () => {
+      this.db.exec('DELETE FROM programs');
+      programs.forEach(program => insertProgram(this.db, program));
+    });
   }
 
   updateProgramStatus(id: string, completed: boolean): void {
-    const program = this.data.programs.find((p) => p.id === id);
-    if (program) {
-      program.completed = completed;
-      this.saveData();
-    }
+    this.db.prepare('UPDATE programs SET completed = ? WHERE id = ?').run(Number(completed), id);
   }
 
-
-
-  // 添加新节目
-  addProgram(title: string, order: number, performers?: [string | null, string[]][] | null, band_name?: string | null, parentId?: string, subOrder?: number): Program {
-    const newProgram: Program = {
-      id: Date.now().toString(),
-      title,
-      performers: performers || null,
-      band_name: band_name || null,
-      order,
-      completed: false,
-      parentId,
-      subOrder,
-    };
-    this.data.programs.push(newProgram);
-    this.saveData();
-    console.log(`➕ 新节目已添加: ${title}${parentId ? ' (子节目)' : ''}`);
-    return newProgram;
+  addProgram(title: string, order: number, performers?: Program['performers'], band_name?: string | null, parentId?: string, subOrder?: number): Program {
+    const program: Program = { id: randomUUID(), title, order, completed: false, performers: performers ?? null, band_name: band_name ?? null, parentId, subOrder };
+    insertProgram(this.db, program);
+    return program;
   }
 
-  // 删除节目
   deleteProgram(id: string): void {
-    const index = this.data.programs.findIndex((p) => p.id === id);
-    if (index !== -1) {
-      const program = this.data.programs[index];
-      
-      // 如果删除的是主节目，同时删除其所有子节目
-      if (!program.parentId) {
-        const subProgramsToDelete = this.data.programs.filter(p => p.parentId === id);
-        subProgramsToDelete.forEach(subProgram => {
-          const subIndex = this.data.programs.findIndex(p => p.id === subProgram.id);
-          if (subIndex !== -1) {
-            this.data.programs.splice(subIndex, 1);
-          }
-        });
-        console.log(`🗑️ 主节目及其 ${subProgramsToDelete.length} 个子节目已删除: ${program.title}`);
-      }
-      
-      // 删除主节目本身
-      const finalIndex = this.data.programs.findIndex((p) => p.id === id);
-      if (finalIndex !== -1) {
-        this.data.programs.splice(finalIndex, 1);
-      }
-      
-      this.saveData();
-      if (program.parentId) {
-        console.log(`🗑️ 子节目已删除: ${program.title}`);
-      }
+    this.db.prepare('DELETE FROM programs WHERE id = ? OR parent_id = ?').run(id, id);
+  }
+
+  updateProgramDetails(id: string, title: string, order: number, performers?: Program['performers'], band_name?: string | null, parentId?: string, subOrder?: number): void {
+    this.db.prepare('UPDATE programs SET title = ?, order_value = ?, performers = ?, band_name = ?, parent_id = ?, sub_order = ? WHERE id = ?')
+      .run(title, order, JSON.stringify(performers ?? null), band_name ?? null, parentId ?? null, subOrder ?? null, id);
+  }
+
+  getDanmakus(page = 1, pageSize = 50, filter: DanmakuFilter | boolean = 'all'): DanmakuPage {
+    const statsRow = this.db.prepare(`SELECT COUNT(*) AS total, COALESCE(SUM(d.censor), 0) AS approved,
+      COALESCE(SUM(CASE WHEN d.censor = 0 AND r.status = 'rejected' THEN 1 ELSE 0 END), 0) AS rejected ${reviewJoin}`).get()!;
+    const stats = { total: Number(statsRow.total), approved: Number(statsRow.approved),
+      pending: Number(statsRow.total) - Number(statsRow.approved) - Number(statsRow.rejected), rejected: Number(statsRow.rejected) };
+    const normalizedFilter = filter === true ? 'pending' : filter === false ? 'all' : filter;
+    const total = normalizedFilter === 'all' ? stats.total : stats[normalizedFilter];
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const currentPage = Math.min(Math.max(1, page), totalPages);
+    const rows = this.db.prepare(`SELECT ${reviewColumns} ${reviewJoin} ${reviewWhere(filter)}
+      ORDER BY d.timestamp DESC, d.seq DESC LIMIT ? OFFSET ?`).all(pageSize, (currentPage - 1) * pageSize);
+    return { danmakus: rows.map(danmakuFromRow), stats, pagination: { page: currentPage, pageSize, total, totalPages } };
+  }
+
+  exportDanmakus(after = 0, snapshot?: number, filter: DanmakuFilter | boolean = 'all') {
+    const upper = snapshot ?? Number(this.db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM danmakus').get()!.seq);
+    const where = reviewWhere(filter);
+    const rows = this.db.prepare(`SELECT ${reviewColumns} ${reviewJoin} ${where || 'WHERE 1 = 1'} AND d.seq > ? AND d.seq <= ?
+      ORDER BY d.seq LIMIT 1001`).all(after, upper);
+    const batch = rows.slice(0, 1000);
+    return { danmakus: batch.map(danmakuFromRow), snapshot: upper, nextCursor: Number(batch.at(-1)?.seq ?? after), hasMore: rows.length > 1000 };
+  }
+
+  // 数据库触发器使审核、撤回、删除和跨连接写入立即使共享快照缓存失效。
+  getPublicDanmakus(): Danmaku[] {
+    const revision = String(this.db.prepare("SELECT value FROM metadata WHERE key = 'danmaku_revision'").get()!.value);
+    if (!this.publicCache || this.publicCache.revision !== revision || this.publicCache.expires <= Date.now()) {
+      const items = this.db.prepare(`SELECT id, content, timestamp, censor, censored_at FROM danmakus
+        WHERE censor = 1 ORDER BY COALESCE(censored_at, timestamp) DESC, seq DESC LIMIT 20`).all().map(danmakuFromRow);
+      this.publicCache = { revision, expires: Date.now() + 1000, items };
     }
+    return this.publicCache.items.map(item => ({ ...item }));
   }
 
-  // 更新节目基本信息（标题、表演者、顺序）
-  updateProgramDetails(id: string, title: string, order: number, performers?: [string | null, string[]][] | null, band_name?: string | null, parentId?: string, subOrder?: number): void {
-    const program = this.data.programs.find((p) => p.id === id);
-    if (program) {
-      program.title = title;
-      program.performers = performers || null;
-      program.band_name = band_name || null;
-      program.order = order;
-      program.parentId = parentId;
-      program.subOrder = subOrder;
-      this.saveData();
-      console.log(`✏️ 节目信息已更新: ${title}`);
-    }
-  }
-
-  // 弹幕相关方法
-  getDanmakus(): Danmaku[] {
-    // 从文件重新加载以确保数据最新
-    this.reloadData();
-    return [...this.data.danmakus].sort((a, b) => b.timestamp - a.timestamp);
-  }
-
-  // Banned IPs
-  getBannedIps(): string[] {
-    this.reloadData();
-    return [...this.data.bannedIps];
-  }
-
-  // Ban IP and unapprove existing censored danmakus from that IP
-  banIp(ip: string): { success: boolean; affected: number } {
-    if (!ip) return { success: false, affected: 0 };
-    this.reloadData();
-    if (!this.data.bannedIps.includes(ip)) {
-      this.data.bannedIps.push(ip);
-      // 取消该 IP 的历史已审核弹幕
-      let affected = 0;
-      const normalizeIp = (ipStr?: string) => {
-        if (!ipStr) return '';
-        let ipx = ipStr.replace(/^\[|\]$/g, '');
-        ipx = ipx.split('%')[0];
-        const match = ipx.match(/(?:.*::ffff:)?(\d+\.\d+\.\d+\.\d+)$/i);
-        if (match) return match[1];
-        return ipx;
-      };
-      this.data.danmakus.forEach((d) => {
-        const did = normalizeIp(d.ip);
-        if (did === ip && d.censor === true) {
-          d.censor = false;
-          delete (d as any).censoredAt;
-          affected += 1;
-        }
-      });
-      this.saveData();
-      console.log(`🔒 已封禁 IP: ${ip}，取消审核的弹幕数量: ${affected}`);
-      return { success: true, affected };
-    }
-    return { success: false, affected: 0 };
-  }
-
-  unbanIp(ip: string): boolean {
-    this.reloadData();
-    const idx = this.data.bannedIps.indexOf(ip);
-    if (idx !== -1) {
-      this.data.bannedIps.splice(idx, 1);
-      this.saveData();
-      console.log(`🔓 已解封 IP: ${ip}`);
-      return true;
-    }
-    return false;
-  }
-
-  clearBannedIps(): void {
-    this.reloadData();
-    this.data.bannedIps = [];
-    this.saveData();
-    console.log('🧹 已清空所有封禁 IP');
-  }
-
-  isIpBanned(ip: string): boolean {
-    this.reloadData();
-    return this.data.bannedIps.includes(ip);
-  }
-
-  // 获取已审核的弹幕
-  getCensoredDanmakus(): Danmaku[] {
-    // 从文件重新加载以确保数据最新
-    this.reloadData();
-    return [...this.data.danmakus]
-      .filter((d) => d.censor === true)
-      .sort((a, b) => {
-        // 按审核通过时间排序，如果没有 censoredAt 则使用 timestamp
-        const timeA = a.censoredAt || a.timestamp;
-        const timeB = b.censoredAt || b.timestamp;
-        return timeA - timeB; // 正序，最新审核的在后面
-      });
-  }
+  getCensoredDanmakus(): Danmaku[] { return this.getPublicDanmakus().reverse(); }
 
   addDanmaku(content: string, ip?: string): Danmaku {
-    // 在添加前重新加载数据，确保基于最新状态
-    this.reloadData();
-    
-    const danmaku: Danmaku = {
-      id: Date.now().toString(),
-      content,
-      timestamp: Date.now(),
-      censor: false, // 默认未审核
-      ip,
-    };
-    this.data.danmakus.push(danmaku);
-    this.saveData();
+    const danmaku: Danmaku = { id: randomUUID(), content, timestamp: Date.now(), censor: false, ip };
+    insertDanmaku(this.db, danmaku);
     return danmaku;
   }
 
-  // 更新弹幕审核状态
   updateDanmakuCensor(id: string, censor: boolean): boolean {
-    // 在修改前重新加载数据，确保基于最新状态进行修改
-    this.reloadData();
-    
-    const danmaku = this.data.danmakus.find((d) => d.id === id);
-    if (danmaku) {
-      danmaku.censor = censor;
-      // 如果是审核通过，记录审核时间；如果是取消审核，清除审核时间
-      if (censor) {
-        danmaku.censoredAt = Date.now();
-      } else {
-        delete danmaku.censoredAt;
-      }
-      this.saveData();
-      console.log(`✅ 弹幕审核状态已更新: ${censor ? '通过' : '未通过'}`);
+    return this.updateDanmakuReview(id, censor ? 'approved' : 'pending');
+  }
+
+  updateDanmakuReview(id: string, status: DanmakuReview['status']): boolean {
+    return transaction(this.db, () => {
+      const changed = this.db.prepare('UPDATE danmakus SET censor = ?, censored_at = ? WHERE id = ?')
+        .run(Number(status === 'approved'), status === 'approved' ? Date.now() : null, id).changes;
+      if (!changed) return false;
+      const reason = status === 'approved' ? '管理员通过' : status === 'rejected' ? '管理员拦截' : '管理员转回待审核';
+      this.db.prepare(`INSERT INTO danmaku_reviews (danmaku_id, status, source, reason) VALUES (?, ?, 'manual', ?)
+        ON CONFLICT(danmaku_id) DO UPDATE SET status = excluded.status, source = excluded.source, reason = excluded.reason`)
+        .run(id, status, reason);
       return true;
-    }
-    return false;
+    });
   }
 
-  clearDanmakus(): void {
-    this.data.danmakus = [];
-    this.saveData();
+  clearDanmakus(): void { this.db.exec('DELETE FROM danmakus'); }
+  deleteDanmaku(id: string): boolean { return this.db.prepare('DELETE FROM danmakus WHERE id = ?').run(id).changes > 0; }
+  getBannedIps(): string[] { return this.db.prepare('SELECT ip FROM banned_ips ORDER BY rowid').all().map(row => String(row.ip)); }
+
+  banIp(value: string): { success: boolean; affected: number } {
+    if (!value) return { success: false, affected: 0 };
+    const ip = normalizeIp(value);
+    return transaction(this.db, () => {
+      const inserted = this.db.prepare('INSERT OR IGNORE INTO banned_ips VALUES (?)').run(ip);
+      if (!inserted.changes) return { success: false, affected: 0 };
+      this.db.prepare(`INSERT INTO danmaku_reviews (danmaku_id, status, source, reason)
+        SELECT id, 'rejected', 'manual', 'IP 已被管理员封禁' FROM danmakus WHERE ip = ?
+        ON CONFLICT(danmaku_id) DO UPDATE SET status = excluded.status, source = excluded.source, reason = excluded.reason`).run(ip);
+      const updated = this.db.prepare('UPDATE danmakus SET censor = 0, censored_at = NULL WHERE ip = ? AND censor = 1').run(ip);
+      return { success: true, affected: Number(updated.changes) };
+    });
   }
 
-  deleteDanmaku(id: string): boolean {
-    const index = this.data.danmakus.findIndex(d => d.id === id);
-    if (index !== -1) {
-      this.data.danmakus.splice(index, 1);
-      this.saveData();
-      console.log(`✅ 弹幕已删除: ${id}`);
-      return true;
-    }
-    return false;
-  }
+  unbanIp(ip: string): boolean { return this.db.prepare('DELETE FROM banned_ips WHERE ip = ?').run(normalizeIp(ip)).changes > 0; }
+  clearBannedIps(): void { this.db.exec('DELETE FROM banned_ips'); }
+  isIpBanned(ip: string): boolean { return Boolean(this.db.prepare('SELECT 1 FROM banned_ips WHERE ip = ?').get(normalizeIp(ip))); }
 
-  // 抽奖相关方法
   getLotteryConfig(): LotteryConfig {
-    // 从文件重新加载以确保数据最新
-    this.reloadData();
-    return { ...this.data.lotteryConfig };
+    return JSON.parse(String(this.db.prepare("SELECT value FROM settings WHERE key = 'lottery_config'").get()!.value));
   }
 
   updateLotteryConfig(config: Partial<LotteryConfig>): LotteryConfig {
-    this.data.lotteryConfig = { ...this.data.lotteryConfig, ...config };
-    this.saveData();
-    return this.data.lotteryConfig;
+    return transaction(this.db, () => {
+      const updated = { ...this.getLotteryConfig(), ...config };
+      validateLotteryConfig(updated);
+      this.db.prepare("UPDATE settings SET value = ? WHERE key = 'lottery_config'").run(JSON.stringify(updated));
+      return updated;
+    });
   }
 
-  // 添加新的抽奖结果
   addLotteryResult(title: string, numbers: number[]): LotteryResult {
-    const result: LotteryResult = {
-      id: Date.now().toString(),
-      title,
-      numbers,
-      timestamp: Date.now(),
-    };
-    this.data.lotteryResults.push(result);
-    this.saveData();
-    console.log(`🎁 新抽奖结果已保存: ${title}`);
+    const result = { id: randomUUID(), title, numbers, timestamp: Date.now() };
+    this.db.prepare('INSERT INTO lottery_results (id, title, numbers, timestamp) VALUES (?, ?, ?, ?)')
+      .run(result.id, title, JSON.stringify(numbers), result.timestamp);
     return result;
   }
 
-  // 获取所有抽奖结果（按时间倒序）
-  getAllLotteryResults(): LotteryResult[] {
-    // 从文件重新加载以确保数据最新
-    this.reloadData();
-    return [...this.data.lotteryResults].sort((a, b) => b.timestamp - a.timestamp);
+  drawLottery(id: string, config: LotteryConfig): LotteryResult {
+    validateLotteryConfig(config);
+    const requestConfig = JSON.stringify({ minNumber: config.minNumber, maxNumber: config.maxNumber, count: config.count, title: config.title!.trim() });
+    return transaction(this.db, () => {
+      const existing = this.db.prepare('SELECT * FROM lottery_results WHERE id = ?').get(id);
+      if (existing) {
+        const result = resultFromRow(existing);
+        const previous = this.db.prepare('SELECT config FROM lottery_draw_requests WHERE result_id = ?').get(id);
+        if (!previous || previous.config !== requestConfig) throw new LotteryError('抽奖请求编号冲突');
+        return result;
+      }
+      if (this.db.prepare('SELECT 1 FROM lottery_unpublished LIMIT 1').get()) throw new LotteryError('已有未揭晓的抽奖结果，请先恢复并揭晓');
+      const used = new Set<number>();
+      for (const row of this.db.prepare('SELECT numbers FROM lottery_results').all()) {
+        for (const n of JSON.parse(String(row.numbers))) {
+          if (Number.isSafeInteger(n) && n >= config.minNumber && n <= config.maxNumber) used.add(n);
+        }
+      }
+      const excluded = Array.from(used).sort((a, b) => a - b);
+      const available = config.maxNumber - config.minNumber + 1 - excluded.length;
+      if (available < config.count) throw new LotteryError(`可用号码仅剩 ${available} 个，不足以抽取 ${config.count} 人`);
+      const chosen = new Set<number>();
+      // Floyd 无放回抽样，内存只与中奖人数相关。
+      for (let j = available - config.count; j < available; j++) {
+        const candidate = randomInt(j + 1);
+        chosen.add(chosen.has(candidate) ? j : candidate);
+      }
+      const numbers = Array.from(chosen).map(index => {
+        let low = config.minNumber, high = config.maxNumber;
+        while (low < high) {
+          const mid = Math.floor((low + high) / 2);
+          let l = 0, r = excluded.length;
+          while (l < r) { const m = Math.floor((l + r) / 2); if (excluded[m] <= mid) l = m + 1; else r = m; }
+          if (mid - config.minNumber + 1 - l > index) high = mid; else low = mid + 1;
+        }
+        return low;
+      });
+      // 随机展示顺序，避免抽样算法对位置引入顺序偏差。
+      for (let i = numbers.length - 1; i > 0; i--) { const j = randomInt(i + 1); [numbers[i], numbers[j]] = [numbers[j], numbers[i]]; }
+      const result = { id, title: config.title!.trim(), numbers, timestamp: Date.now() };
+      this.db.prepare('INSERT INTO lottery_results (id, title, numbers, timestamp) VALUES (?, ?, ?, ?)')
+        .run(id, result.title, JSON.stringify(numbers), result.timestamp);
+      this.db.prepare('INSERT INTO lottery_unpublished VALUES (?)').run(id);
+      this.db.prepare('INSERT INTO lottery_reveal_progress VALUES (?, 0)').run(id);
+      this.db.prepare('INSERT INTO lottery_draw_requests VALUES (?, ?)').run(id, requestConfig);
+      return result;
+    });
   }
 
-  // 获取最新的抽奖结果
-  getLatestLotteryResult(): LotteryResult | null {
-    // 从文件重新加载以确保数据最新
-    this.reloadData();
-    if (this.data.lotteryResults.length === 0) {
-      return null;
-    }
-    return { ...this.data.lotteryResults[this.data.lotteryResults.length - 1] };
+  getUnpublishedLotteryResult(): LotteryResult | null {
+    const row = this.db.prepare('SELECT r.*, COALESCE(p.revealed_count, 0) AS revealed_count FROM lottery_results r JOIN lottery_unpublished u ON u.result_id = r.id LEFT JOIN lottery_reveal_progress p ON p.result_id = r.id ORDER BY r.seq DESC LIMIT 1').get();
+    return row ? { ...resultFromRow(row), revealedCount: Number(row.revealed_count) } : null;
   }
 
-  // 删除指定的抽奖结果
-  deleteLotteryResult(id: string): boolean {
-    const index = this.data.lotteryResults.findIndex(r => r.id === id);
-    if (index !== -1) {
-      this.data.lotteryResults.splice(index, 1);
-      this.saveData();
-      console.log(`🗑️ 已删除抽奖结果: ${id}`);
+  revealLotteryResult(id: string, count?: number): boolean {
+    return transaction(this.db, () => {
+      const row = this.db.prepare('SELECT numbers FROM lottery_results WHERE id = ?').get(id);
+      if (!row) return false;
+      if (this.db.prepare('SELECT 1 FROM lottery_invalid_results WHERE result_id = ?').get(id)) throw new LotteryError('该结果已作废');
+      const total = (JSON.parse(String(row.numbers)) as number[]).length;
+      const requested = count === undefined ? total : count;
+      if (!Number.isSafeInteger(requested) || requested < 0 || requested > total) throw new LotteryError('无效的揭晓数量');
+      this.db.prepare(`INSERT INTO lottery_reveal_progress VALUES (?, ?)
+        ON CONFLICT(result_id) DO UPDATE SET revealed_count = MAX(revealed_count, excluded.revealed_count)`).run(id, requested);
+      if (requested === total) this.db.prepare('DELETE FROM lottery_unpublished WHERE result_id = ?').run(id);
       return true;
-    }
-    return false;
+    });
   }
 
-  // 清空所有抽奖结果
-  clearAllLotteryResults(): void {
-    this.data.lotteryResults = [];
-    this.saveData();
-    console.log('🗑️ 已清空所有抽奖结果');
+  invalidateLotteryResult(id: string, reason: string): boolean {
+    if (!reason.trim() || reason.length > 200) throw new LotteryError('请填写作废原因');
+    return transaction(this.db, () => {
+      const row = this.db.prepare('SELECT numbers FROM lottery_results WHERE id = ?').get(id);
+      if (!row) return false;
+      if ((JSON.parse(String(row.numbers)) as number[]).length !== 1 || this.db.prepare('SELECT 1 FROM lottery_unpublished WHERE result_id = ?').get(id)) throw new LotteryError('只能作废已全部揭晓的单人抽奖结果');
+      this.db.prepare('INSERT OR IGNORE INTO lottery_invalid_results VALUES (?, ?, ?)').run(id, reason.trim(), Date.now());
+      return true;
+    });
   }
 
-  // 重置所有数据到默认值
+  getAllLotteryResults(includeInvalid = false): LotteryResult[] {
+    return this.db.prepare(`SELECT r.*, p.revealed_count, i.timestamp AS invalidated_at, i.reason AS invalid_reason,
+      u.result_id AS unpublished FROM lottery_results r
+      LEFT JOIN lottery_unpublished u ON u.result_id = r.id
+      LEFT JOIN lottery_reveal_progress p ON p.result_id = r.id
+      LEFT JOIN lottery_invalid_results i ON i.result_id = r.id
+      WHERE (? = 1 OR i.result_id IS NULL) ORDER BY r.timestamp DESC, r.seq DESC`).all(Number(includeInvalid)).flatMap(row => {
+        const result = resultFromRow(row);
+        const revealed = row.unpublished == null ? result.numbers.length : Number(row.revealed_count ?? 0);
+        if (!revealed) return [];
+        result.numbers = result.numbers.slice(0, revealed);
+        if (row.invalidated_at != null) { result.invalidatedAt = Number(row.invalidated_at); result.invalidReason = String(row.invalid_reason); }
+        return [result];
+      });
+  }
+
+  getLatestLotteryResult(): LotteryResult | null {
+    return this.getAllLotteryResults()[0] ?? null;
+  }
+
+  deleteLotteryResult(id: string): boolean { return this.db.prepare('DELETE FROM lottery_results WHERE id = ?').run(id).changes > 0; }
+  clearAllLotteryResults(): void { this.db.exec('DELETE FROM lottery_results'); }
+
   resetAllData(): void {
-    this.data = { ...this.defaultData };
-    this.saveData();
-    console.log('🔄 所有数据已重置为默认值');
+    transaction(this.db, () => {
+      this.db.exec('DELETE FROM programs; DELETE FROM danmakus; DELETE FROM banned_ips; DELETE FROM lottery_results;');
+      defaultData.programs.forEach(program => insertProgram(this.db, program));
+      this.db.prepare("UPDATE settings SET value = ? WHERE key = 'lottery_config'").run(JSON.stringify(defaultData.lotteryConfig));
+    });
   }
 
-  // 获取完整数据（用于备份）
   getAllData(): DataStoreState {
-    return { ...this.data };
+    return {
+      programs: this.getPrograms(), danmakus: this.db.prepare('SELECT * FROM danmakus ORDER BY seq').all().map(danmakuFromRow),
+      bannedIps: this.getBannedIps(), lotteryConfig: this.getLotteryConfig(), lotteryResults: this.getAllLotteryResults().reverse(),
+    };
   }
 }
 
-// 单例模式
 export const dataStore = new DataStore();

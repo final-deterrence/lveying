@@ -1,6 +1,6 @@
-# 掠影 - 电子系第27届学生节晚会互动系统
+# 无间道 - 电子系第27届学生节晚会互动系统
 
-掠影是一个专为清华大学电子系第27届学生节打造的全功能晚会互动网站系统。该系统包含观众端和管理端两个部分，为现场观众和后台工作人员提供了完整的互动体验。观众可以通过网站实时查看节目进度、参与弹幕互动、查看抽奖结果，而管理员则可以通过后台系统管理节目单、审核弹幕、配置和执行抽奖等操作。整个系统基于 Next.js 14 构建，采用现代化的技术栈，提供了流畅的用户体验和强大的管理功能。效果可以参考[Demo](https://www.lveying.live)。
+无间道是一个专为清华大学电子系第27届学生节打造的全功能晚会互动网站系统。该系统包含观众端和管理端两个部分，为现场观众和后台工作人员提供了完整的互动体验。观众可以通过网站实时查看节目进度、参与弹幕互动、查看抽奖结果，而管理员则可以通过后台系统管理节目单、审核弹幕、配置和执行抽奖等操作。整个系统基于 Next.js 14 构建，采用现代化的技术栈，提供了流畅的用户体验和强大的管理功能。效果可以参考[Demo](https://www.lveying.live)。
 
 ![alt text](assets/image.jpeg)
 ## 案例
@@ -9,9 +9,9 @@
 
 本系统分为观众端和管理端两大模块，为不同角色提供针对性的功能支持。
 
-观众端为现场参与晚会的观众提供了丰富的互动功能。主页以精美的海报形式展示晚会信息，并提供清晰的导航入口。抽奖功能让观众能够实时查看中奖号码，每次抽奖都配有完整的历史记录和精美的背景图片。弹幕系统允许观众发送互动消息，每条弹幕经过审核后会在大屏幕上展示，营造热烈的现场氛围。节目进度页面实时显示当前正在进行的节目，观众可以查看完整的节目单和详细的演职人员信息。整个观众端完美适配移动设备，观众可以通过手机随时参与互动。
+观众端为现场参与晚会的观众提供了丰富的互动功能。主页以精美的海报形式展示晚会信息，并提供清晰的导航入口。抽奖功能让观众能够实时查看中奖号码，已揭晓的中奖号码会显示在结果页。弹幕系统允许观众发送互动消息，每条弹幕经过审核后会在大屏幕上展示，营造热烈的现场氛围。节目进度页面实时显示当前正在进行的节目，观众可以查看完整的节目单和详细的演职人员信息。整个观众端完美适配移动设备，观众可以通过手机随时参与互动。
 
-管理端为晚会工作人员提供了完善的后台管理功能。系统采用密码认证和 JWT Token 双重鉴权机制，确保管理功能的安全性。节目管理模块支持实时更新节目单、标记当前进行的节目、管理演职人员信息。弹幕管理功能让管理员能够实时查看所有弹幕，审核通过或拒绝特定弹幕，并可以封禁发送不当内容的 IP 地址。抽奖管理模块功能强大，管理员可以配置不同等级的奖项、设置中奖人数范围、上传背景图片，并使用专业的全屏抽奖页面进行抽奖，抽奖动画采用滚动数字效果，增强现场互动氛围。抽奖系统还具备离线队列功能，即使网络中断也能确保中奖结果不会丢失。
+管理端为晚会工作人员提供了完善的后台管理功能。系统采用密码认证和 JWT Token 双重鉴权机制，确保管理功能的安全性。节目管理模块支持实时更新节目单、标记当前进行的节目、管理演职人员信息。弹幕管理功能让管理员能够实时查看所有弹幕，审核通过或拒绝特定弹幕，并可以封禁发送不当内容的 IP 地址。抽奖管理模块支持设置号码范围、配置各场奖项和人数，并按无间道主题流程逐个揭晓中奖号码。抽奖由服务器完成，网络异常后可使用相同请求恢复。
 
 ![](assets/mac.jpeg)
 
@@ -31,7 +31,7 @@ export PORT="8880"
 ```bash
 sudo apt update
 sudo apt install -y curl nginx
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo npm install -g pm2
 node -v
@@ -57,7 +57,7 @@ cat .env.local
 5. 构建并启动项目
 ```bash
 npm run build
-PORT="$PORT" pm2 start npm --name lveying -- start
+pm2 start npm --name lveying -- start -- --hostname 127.0.0.1 --port "$PORT"
 pm2 save
 pm2 startup
 ```
@@ -72,21 +72,21 @@ server {
     location / {
         proxy_pass http://127.0.0.1:$PORT;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
     }
 }
 EOF
 sudo ln -sf /etc/nginx/sites-available/lveying /etc/nginx/sites-enabled/lveying
-sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
-sudo systemctl enable nginx
-sudo systemctl restart nginx
+sudo systemctl reload nginx
 ```
+
+复用科协服务器时，只新增本站的独立子域名配置，保留现有站点。必须由 Nginx 覆盖 `X-Real-IP`，应用端口只绑定本机；生产环境缺少有效入口 IP 时会拒绝弹幕提交。上述 Bash 模板中的 `\$` 用于保留 Nginx 变量。详细说明见 [弹幕限流与自动审核](docs/DANMAKU_MODERATION.md)。
 
 7. 打开网站，首次登录后台后修改管理员密码
 ```bash
@@ -122,7 +122,7 @@ sudo certbot --nginx -d "$DOMAIN"
 
 ## 技术架构
 
-本系统采用现代化的前端技术栈构建。框架选用 Next.js 14，使用最新的 App Router 架构，充分利用服务端渲染和客户端渲染的优势。整个项目使用 TypeScript 编写，提供完整的类型安全保障。样式系统基于 Tailwind CSS，实现了响应式设计和美观的用户界面。用户认证采用 JWT 令牌机制，密码通过 bcryptjs 进行加密存储。数据持久化使用 JSON 文件存储方案，简单可靠，适合中小型晚会场景。系统还集成了 Markdown 渲染和 KaTeX 数学公式支持，可以展示格式丰富的内容。
+本系统采用现代化的前端技术栈构建。框架选用 Next.js 14，使用最新的 App Router 架构，充分利用服务端渲染和客户端渲染的优势。整个项目使用 TypeScript 编写，提供完整的类型安全保障。样式系统基于 Tailwind CSS，实现了响应式设计和美观的用户界面。用户认证采用 JWT 令牌机制，密码通过 bcryptjs 进行加密存储。数据持久化使用 Node.js 24 内置的 SQLite，支持索引查询、事务和 WAL，无需单独部署数据库服务。旧 JSON 数据会在首次访问业务接口时自动迁移，原文件保留。部署与备份详见 [SQLite 存储说明](docs/SQLITE.md)。系统还集成了 Markdown 渲染和 KaTeX 数学公式支持，可以展示格式丰富的内容。
 
 ## License
 
@@ -132,15 +132,17 @@ sudo certbot --nginx -d "$DOMAIN"
 
 ## 快速开始
 
-在开始使用之前，请确保您的开发环境已安装 Node.js 18 或更高版本以及 npm 包管理器。首先克隆项目仓库到本地，然后在项目根目录下运行 `npm install` 安装所有依赖包。安装完成后，需要配置管理员密码。您可以使用 Node.js 命令生成密码哈希值：`node -e "const bcrypt = require('bcryptjs'); bcrypt.hash('your-password', 10).then(console.log);"`。将生成的哈希值和一个随机的 JWT 密钥添加到 `.env.local` 文件中。配置完成后，运行 `npm run dev` 启动开发服务器，访问 `http://localhost:8880` 即可看到系统主页。
+请使用 Node.js 24（可通过 `nvm use` 切换），在项目根目录运行 `npm ci`，并在 `.env.local` 配置随机的 `JWT_SECRET`。运行 `npm run dev` 后访问 `http://localhost:8880`。SQLite 数据库会自动初始化或导入原 JSON；已有管理员密码保持不变，全新安装的默认密码为 `admin123`，首次登录后请在后台修改。无需安装数据库服务。详见 [SQLite 部署、迁移与备份](docs/SQLITE.md)。
 
 对于生产环境部署，首先运行 `npm run build` 构建项目，然后使用 `npm start` 启动生产服务器。
+
+开发服务的缓存目录为 `.next-dev/`，生产构建和启动使用 `.next/`，避免构建覆盖正在运行的开发页面。若旧开发服务出现 `__webpack_modules__[moduleId] is not a function`，在原终端按 Ctrl+C 后重新运行 `npm run dev`，再强制刷新浏览器。
 
 ## 使用指南
 
 观众通过访问系统主页可以看到晚会海报和导航菜单。点击"节目进度"可以查看当前正在进行的节目和完整节目单，每个节目可以展开查看详细的演职人员信息。点击"抽奖"可以查看所有抽奖历史和中奖号码，每个奖项都有独立的展示页面。点击"弹幕"可以发送弹幕消息，输入限制为20个字符，每条弹幕都会记录发送者的 IP 地址用于审核，通过审核的弹幕会在大屏幕上实时展示。
 
-管理员需要先访问 `/admin` 登录页面，输入管理员密码后进入控制台。控制台提供了前往各个管理模块的快捷入口。在节目管理页面，管理员可以添加新节目、编辑现有节目信息、标记当前正在进行的节目。在弹幕管理页面，可以查看所有待审核的弹幕，批量通过或拒绝弹幕，封禁发送不当内容的 IP。在抽奖管理页面，可以配置抽奖参数，如奖项名称、中奖人数范围、背景图片等，配置完成后可以打开全屏抽奖页面进行抽奖。抽奖页面支持键盘快捷键，按空格键开始抽奖，按数字键可以快速设置常用抽奖配置（0为特等奖1个，1为一等奖3个，2为二等奖10个，3为三等奖15个），按回车键确认中奖结果。系统会自动保存所有中奖记录，即使遇到网络问题也不会丢失数据。
+管理员需要先访问 `/admin` 登录页面，输入管理员密码后进入控制台。控制台提供了前往各个管理模块的快捷入口。在节目管理页面，管理员可以添加新节目、编辑现有节目信息、标记当前正在进行的节目。在弹幕管理页面，可以查看所有待审核的弹幕，批量通过或拒绝弹幕，封禁发送不当内容的 IP。在抽奖管理页面设置号码范围，打开抽奖大屏后按场景设置奖项名称和人数，依次点击“开始滚动”“确认抽取”“揭晓下一个”。空格键执行当前步骤，左右方向键切换场景，H 键显示或隐藏导播面板。详细操作、恢复方式和素材占位见 [无间道抽奖操作说明](docs/LOTTERY.md)。
 
 ## API 接口说明
 
@@ -178,7 +180,7 @@ sudo certbot --nginx -d "$DOMAIN"
 - **路径**: `/api/danmaku/censored` 或 `/api/danmaku/public`
 - **参数**: 无
 - **返回**: `{ danmakus: Danmaku[] }` (不含 IP 地址，仅返回最新20条)
-- **说明**: 两个路径功能相同，都是获取已通过审核的弹幕
+- **说明**: 均返回按审核时间选取的最近20条；`public` 按新到旧排列，`censored` 按旧到新排列供大屏展示
 - **示例**:
   ```bash
   curl http://localhost:8880/api/danmaku/censored
@@ -305,13 +307,13 @@ sudo certbot --nginx -d "$DOMAIN"
     -H "Authorization: Bearer <token>"
   ```
 
-#### 获取所有弹幕
+#### 分页获取弹幕
 
 - **方法**: `GET`
 - **路径**: `/api/danmaku`
-- **参数**: 无
-- **返回**: `{ danmakus: Danmaku[] }` (含 IP 地址)
-- **说明**: 包含所有弹幕，含待审核和已审核的，用于管理员审核
+- **参数**: `page`、`pageSize`、`pending`，均可选
+- **返回**: `{ danmakus: Danmaku[], stats, pagination }` (管理员可见 IP 地址)
+- **说明**: 服务端分页，参数 `page`（默认1）、`pageSize`（默认50，最多100）、`pending=true`（仅待审核）。返回 `{ danmakus, stats, pagination }`，详见 [接口与导出说明](docs/SQLITE.md)。
 - **示例**:
   ```bash
   curl http://localhost:8880/api/danmaku \
@@ -419,19 +421,13 @@ sudo certbot --nginx -d "$DOMAIN"
     -d '{"title":"一等奖","minNumber":1,"maxNumber":100,"count":3}'
   ```
 
-#### 保存抽奖结果
+#### 执行抽奖与逐个揭晓
 
-- **方法**: `POST`
-- **路径**: `/api/lottery/result`
-- **参数**: `{ title: string, numbers: number[] }`
-- **返回**: `{ success: boolean }`
-- **示例**:
-  ```bash
-  curl -X POST http://localhost:8880/api/lottery/result \
-    -H "Authorization: Bearer <token>" \
-    -H "Content-Type: application/json" \
-    -d '{"title":"一等奖","numbers":[15,42,88]}'
-  ```
+- **路径**: `/api/lottery/draw`，需要管理员认证。
+- `POST` 传入 `{ id, config }`，由服务端抽取并保存号码；同一 UUID 请求重试不会重复抽取。
+- `GET` 查询当前未完全揭晓的批次；`PUT` 传入 `{ id, count }` 将前 `count` 个号码公开。
+- `PUT` 传入 `{ id, action: "invalidate", reason }` 可作废已完全揭晓的单人结果；作废号码不会再次参与抽取。
+- `/api/lottery/result` 不接受客户端指定中奖号码。
 
 #### 获取抽奖历史
 
@@ -439,7 +435,7 @@ sudo certbot --nginx -d "$DOMAIN"
 - **路径**: `/api/lottery/history`
 - **参数**: 无
 - **返回**: `{ history: LotteryResult[] }`
-- **说明**: 公开接口，无需认证
+- **说明**: 公开接口仅显示已揭晓且有效的号码；使用管理员 Token 可查看作废记录。
 - **示例**:
   ```bash
   curl http://localhost:8880/api/lottery/history
@@ -451,7 +447,7 @@ sudo certbot --nginx -d "$DOMAIN"
 - **路径**: `/api/lottery/history`
 - **参数**: 无
 - **返回**: `{ success: boolean }`
-- **说明**: 删除所有抽奖历史记录
+- **说明**: 删除所有抽奖历史记录并重置去重号码池，可能使之前的号码再次中奖。
 - **示例**:
   ```bash
   curl -X DELETE http://localhost:8880/api/lottery/history \
@@ -484,7 +480,8 @@ lueying/
 │   │   │
 │   │   ├── lottery/                  # 抽奖相关 API
 │   │   │   ├── config/route.ts       # 抽奖配置接口（GET/POST）
-│   │   │   ├── result/route.ts       # 保存抽奖结果接口（POST）
+│   │   │   ├── draw/route.ts         # 服务端抽奖、揭晓与作废
+│   │   │   ├── result/route.ts       # 获取最新已揭晓结果
 │   │   │   └── history/route.ts      # 抽奖历史接口（GET 公开/DELETE 清空）
 │   │   │
 │   │   └── programs/                 # 节目相关 API
@@ -530,14 +527,15 @@ lueying/
 ├── lib/                              # 工具函数库
 │   ├── auth.ts                       # JWT 认证工具（生成/验证 Token）
 │   ├── buildTime.ts                  # 构建时间工具（已弃用）
-│   ├── dataStore.ts                  # 数据存储管理（JSON 文件读写）
+│   ├── database.ts                   # SQLite 初始化、索引与 JSON 迁移
+│   ├── dataStore.ts                  # SQLite 业务查询与事务
 │   └── userManager.ts                # 用户管理（密码验证和修改）
 │
 ├── types/                            # TypeScript 类型定义
 │   └── index.ts                      # 全局类型定义（Program, Danmaku, LotteryConfig 等）
 │
-├── data/                             # 数据存储目录（JSON 文件）
-│   └── store.json                    # 主数据文件（节目、弹幕、抽奖等数据）
+├── data/                             # 持久化目录，部署时整体挂载
+│   └── lveying.sqlite                # SQLite 主数据库，另有 WAL/SHM 文件
 │
 ├── public/                           # 静态资源目录
 │   ├── favicon-16.png                # 16x16 网站图标
@@ -594,12 +592,12 @@ lueying/
 
 ### 关键文件说明
 
-**数据存储** (`lib/dataStore.ts`): 核心数据管理模块，负责读写 `data/store.json`，提供节目、弹幕、抽奖、IP 封禁等数据的增删改查接口。
+**数据存储** (`lib/dataStore.ts`): 核心数据管理模块，通过 SQLite 索引查询、局部更新和事务提供节目、弹幕、抽奖、IP 封禁等接口。`lib/database.ts` 负责初始化并一次性导入旧 `store.json` 和 `users.json`。
 
 **认证系统** (`lib/auth.ts`, `lib/userManager.ts`): JWT Token 生成和验证，管理员密码的加密存储和验证。
 
 **类型定义** (`types/index.ts`): 定义了整个项目使用的 TypeScript 接口，包括 `Program`（节目）、`Danmaku`（弹幕）、`LotteryConfig`（抽奖配置）等。
 
-**抽奖动画** (`app/admin/lottery/display/page.tsx`): 实现了完整的抽奖动画效果，支持键盘快捷键、离线队列、滚动数字动画等高级功能。
+**抽奖导播台** (`app/admin/lottery/display/page.tsx`): 按无间道流程展示场景，支持键盘操作、服务端抽奖、随机位置逐个或快速全部揭晓与状态恢复。点击“打开纯净大屏”可在同一浏览器的独立窗口同步投影，投影页为 `/admin/lottery/screen`；观众结果页 `/lottery` 保持只展示已揭晓结果。详见 [抽奖操作说明](docs/LOTTERY.md)。
 
-**弹幕系统**: 包含发送、审核、展示三个部分，支持 IP 封禁和自动规范化 IPv6 地址。
+**弹幕系统**: 包含发送、审核、展示三个部分，支持服务端限流、IP 封禁、整句白名单自动通过、禁用词自动拦截，其余内容交给人工。后台“弹幕管理 → 限流与自动审核”可以调整规则、试审和查看拦截统计；观众端统一显示提交成功。详见 [配置与部署说明](docs/DANMAKU_MODERATION.md)。

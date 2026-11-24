@@ -39,24 +39,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { title, numbers } = await request.json();
-
-    if (!title || typeof title !== 'string') {
-      return NextResponse.json(
-        { error: '请提供奖项名称' },
-        { status: 400 }
-      );
-    }
-
-    if (!Array.isArray(numbers)) {
-      return NextResponse.json(
-        { error: '无效的抽奖结果' },
-        { status: 400 }
-      );
-    }
-
-    const result = dataStore.addLotteryResult(title, numbers);
-    return NextResponse.json({ success: true, result });
+    return NextResponse.json({ error: '请使用服务端抽奖接口' }, { status: 405 });
   } catch (error) {
     return NextResponse.json(
       { error: '添加抽奖结果失败' },
@@ -76,25 +59,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const { id } = await request.json();
-
-    if (!id) {
-      return NextResponse.json(
-        { error: '请提供抽奖结果ID' },
-        { status: 400 }
-      );
-    }
-
-    const success = dataStore.deleteLotteryResult(id);
-    
-    if (success) {
-      return NextResponse.json({ success: true });
-    } else {
-      return NextResponse.json(
-        { error: '抽奖结果不存在' },
-        { status: 404 }
-      );
-    }
+    return NextResponse.json({ error: '中奖记录不能单独删除，以免号码再次中奖' }, { status: 405 });
   } catch (error) {
     return NextResponse.json(
       { error: '删除抽奖结果失败' },

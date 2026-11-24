@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { verifyToken, getTokenFromRequest } from '@/lib/auth';
 import { dataStore } from '@/lib/dataStore';
 
+export const dynamic = 'force-dynamic';
+
 // 验证管理员权限的中间件
 function verifyAdmin(request: Request) {
   const token = getTokenFromRequest(request);

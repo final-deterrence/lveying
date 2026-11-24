@@ -29,21 +29,21 @@ export default function DanmakuPage() {
   // 本地不必重复定义占位句子，使用模块级常量 PLACEHOLDERS
 
   // 获取最近的弹幕
-  const fetchRecentDanmakus = async () => {
+  const fetchRecentDanmakus = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await fetch('/api/danmaku/public');
+      const response = await fetch('/api/danmaku/public', { signal, cache: 'no-store' });
+      if (!response.ok) throw new Error('获取弹幕失败');
       const data = await response.json();
-      // 获取最新20条弹幕，按时间倒序排列（最新的在前）
-      const sortedDanmakus = (data.danmakus || [])
-        .sort((a: Danmaku, b: Danmaku) => b.timestamp - a.timestamp)
-        .slice(0, 20);
+      if (signal?.aborted) return;
+      // 服务端按审核通过时间返回最近 20 条，包括较晚通过审核的旧消息。
+      const sortedDanmakus = (data.danmakus || []).slice(0, 20);
       setRecentDanmakus(sortedDanmakus);
     } catch (error) {
-      console.error('获取弹幕失败:', error);
+      if (!signal?.aborted) console.error('获取弹幕失败:', error);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  };
+  }, []);
 
   const getRandomPlaceholder = useCallback((prev?: string) => {
     if (PLACEHOLDERS.length === 0) return '';
@@ -59,13 +59,17 @@ export default function DanmakuPage() {
   }, []);
 
   useEffect(() => {
-    fetchRecentDanmakus();
-    // 随机设置输入框 placeholder
-  setPlaceholder(getRandomPlaceholder());
-    // 每3秒刷新一次
-    const interval = setInterval(fetchRecentDanmakus, 3000);
-    return () => clearInterval(interval);
-  }, []);
+    setPlaceholder(getRandomPlaceholder());
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    const poll = async () => {
+      if (!document.hidden) await fetchRecentDanmakus(controller.signal);
+      if (!disposed) timer = setTimeout(poll, 3000);
+    };
+    poll();
+    return () => { disposed = true; clearTimeout(timer); controller.abort(); };
+  }, [fetchRecentDanmakus, getRandomPlaceholder]);
 
   // 当弹幕更新时，滚动到底部显示最新弹幕
   useEffect(() => {
@@ -76,6 +80,7 @@ export default function DanmakuPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (sending) return;
     
     if (!content.trim()) {
       setMessage('请输入弹幕内容');
@@ -99,16 +104,15 @@ export default function DanmakuPage() {
         body: JSON.stringify({ content: content.trim() }),
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
+      if (response.ok || response.status === 429) {
         setMessage('发送成功！');
         setContent('');
         // 发送成功后立即刷新弹幕列表
-        setTimeout(fetchRecentDanmakus, 500);
+        setTimeout(() => fetchRecentDanmakus(), 500);
   // 发送成功后随机更换一次 placeholder
   setPlaceholder(getRandomPlaceholder(placeholder));
       } else {
+        const data = await response.json().catch(() => ({}));
         setMessage(`${data.error || '发送失败'}`);
       }
     } catch (error) {
@@ -199,6 +203,7 @@ export default function DanmakuPage() {
               <button
                 type="submit"
                 disabled={sending || !content.trim() || content.trim().length > 20}
+                aria-label="发送弹幕"
                 className="w-14 h-14 backdrop-blur-md bg-gradient-to-r from-blue-500/80 to-cyan-500/80 rounded-full shadow-lg border border-white/30 hover:from-blue-600/80 hover:to-cyan-600/80 transform hover:scale-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center"
               >
                 <Image

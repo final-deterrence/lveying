@@ -3,7 +3,7 @@ import './globals.css'
 import TitleManager from '@/components/TitleManager'
 
 export const metadata: Metadata = {
-  title: '掠影-电子系第27届学生节',
+  title: '无间道-电子系第27届学生节',
   description: '欢迎参加电子系第27届学生节',
   icons: {
     icon: [

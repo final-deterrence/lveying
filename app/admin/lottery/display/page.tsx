@@ -1,989 +1,208 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { LotteryConfig } from '@/types';
+import type { LotteryConfig, LotteryResult } from '@/types';
 
-interface FlyingNumber {
-  id: string | number;
-  value: number;
-  row: number; // 0 = 上行，1 = 下行
-  position: number; // 当前横向位置百分比
-  index: number; // 在数字串中的索引
-}
-
-interface PendingLotteryResult {
-  title: string;
-  numbers: number[];
-}
+import LotteryStage from '@/components/lottery/LotteryStage';
+import { buildStageView, createRevealOrder, formatNumber, initialStage, MASK_DURATION, REVEAL_ALL_DURATION, restoreRevealOrder, scenes, STAGE_STATE_KEY, type StageState } from '@/lib/lotteryStage';
+import { useStageBroadcast } from '@/lib/useLotteryStageSync';
 
 export default function LotteryDisplayPage() {
-  const [config, setConfig] = useState<LotteryConfig>({
-    minNumber: 1,
-    maxNumber: 100,
-    count: 5,
-  });
-  const [lotteryTitle, setLotteryTitle] = useState('一等奖');
-  const [rolling, setRolling] = useState(false);
-  const [finalNumbers, setFinalNumbers] = useState<number[]>([]);
-  const [flyingNumbers, setFlyingNumbers] = useState<FlyingNumber[]>([]);
-  const [flashEffect, setFlashEffect] = useState(false); // 白色闪光效果
-  const [backgroundImage, setBackgroundImage] = useState(''); // 随机背景图片
-  const [usedNumbers, setUsedNumbers] = useState<Set<number>>(new Set()); // 已经抽过的号码
-  const [flyingOut, setFlyingOut] = useState(false); // 拍立得飞出动画
-  const [spaceDisabled, setSpaceDisabled] = useState(false); // 空格键禁用状态
-  const [enterDisabled, setEnterDisabled] = useState(true); // Enter键禁用状态
-  const [numberKeysLocked, setNumberKeysLocked] = useState(false); // 数字键锁定状态（按下数字到按下enter期间）
-  const [pendingResults, setPendingResults] = useState<PendingLotteryResult[]>([]); // 待发送的抽奖结果队列
-  const animationFrameRef = useRef<number>();
-  const lastTimeRef = useRef<number>(0);
-  const shutterAudioRef = useRef<HTMLAudioElement | null>(null); // 快门音效引用
-  const spaceDisableTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 空格键禁用定时器
-  const retryIntervalRef = useRef<NodeJS.Timeout | null>(null); // 重试定时器
   const router = useRouter();
-
-  // 根据数量计算需要的行数
-  const calculateRows = (count: number) => {
-    // 特殊处理：15个奖使用5行
-    if (count === 15) {
-      return 5;
-    }
-    // 特殊处理：10个奖使用5行
-    if (count === 10) {
-      return 5;
-    }
-    // 其他情况：每行最多3个
-    return Math.ceil(count / 3);
+  const [state, setState] = useState<StageState>(initialStage);
+  const [config, setConfig] = useState<LotteryConfig | null>(null);
+  const [ready, setReady] = useState(false);
+  const [controls, setControls] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [maskingStartedAt, setMaskingStartedAt] = useState<number | null>(null);
+  const masking = maskingStartedAt !== null;
+  const mounted = useRef(false);
+  const maskingRef = useRef(false);
+  const lock = useRef(false);
+  const stateRef = useRef(state);
+  const save = (next: StageState) => { stateRef.current = next; setState(next); localStorage.setItem(STAGE_STATE_KEY, JSON.stringify(next)); };
+  const token = () => localStorage.getItem('adminToken') || '';
+  class ApiError extends Error { constructor(message: string, readonly status: number) { super(message); } }
+  const api = async (method: string, body?: unknown) => {
+    const response = await fetch('/api/lottery/draw', { method, headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const data = await response.json();
+    if (!response.ok) throw new ApiError(data.error || '请求失败，请重试', response.status);
+    return data;
   };
-
-  // 计算每行应该显示多少个数字
-  const getNumbersPerRow = (totalCount: number): number[] => {
-    // 特殊处理：15个奖使用3-3-3-3-3的分行
-    if (totalCount === 15) {
-      return [3, 3, 3, 3, 3];
-    }
-    
-    // 特殊处理：10个奖使用2-2-2-2-2的分行
-    if (totalCount === 10) {
-      return [2, 2, 2, 2, 2];
-    }
-    
-    // 其他情况使用原来的3-2-3-2模式
-    const rows = calculateRows(totalCount);
-    const numbersPerRow: number[] = [];
-    let remaining = totalCount;
-    
-    for (let i = 0; i < rows; i++) {
-      if (i % 2 === 0) {
-        // 奇数行（第1、3、5...行）：尽量放3个
-        const nums = Math.min(3, remaining);
-        numbersPerRow.push(nums);
-        remaining -= nums;
-      } else {
-        // 偶数行（第2、4、6...行）：尽量放2个
-        const nums = Math.min(2, remaining);
-        numbersPerRow.push(nums);
-        remaining -= nums;
-      }
-    }
-    
-    return numbersPerRow;
-  };
-
-  // 格式化数字为7位，前面补0
-  const formatNumber = (num: number) => {
-    return num.toString().padStart(7, '0');
-  };
-
-  // 生成随机数，排除已使用的号码
-  const generateRandomNumber = (): number => {
-    const availableNumbers = [];
-    for (let i = config.minNumber; i <= config.maxNumber; i++) {
-      if (!usedNumbers.has(i)) {
-        availableNumbers.push(i);
-      }
-    }
-    
-    // 如果没有可用号码了，返回随机数（不限制）
-    if (availableNumbers.length === 0) {
-      return Math.floor(Math.random() * (config.maxNumber - config.minNumber + 1)) + config.minNumber;
-    }
-    
-    // 从可用号码中随机选择
-    return availableNumbers[Math.floor(Math.random() * availableNumbers.length)];
-  };
-
-  // 根据行数计算每行的垂直位置（相对于背景图居中）
-  const getRowPositions = (totalRows: number) => {
-    if (totalRows === 1) return ['50%'];
-    if (totalRows === 2) return ['46.875%', '53.125%'];
-    if (totalRows === 3) return ['43.75%', '50%', '56.25%'];
-    if (totalRows === 4) return ['41.25%', '46.875%', '53.125%', '58.75%'];
-    if (totalRows === 5) return ['37.5%', '43.75%', '50%', '56.25%', '62.5%'];
-    // 更多行的情况，均匀分布（增大25%行间距）
-    const positions: string[] = [];
-    const totalHeight = 25; // 从20%增加到25%，增大25%行间距
-    const step = totalHeight / (totalRows + 1);
-    const startPosition = 50 - totalHeight / 2; // 从中心开始分布
-    for (let i = 1; i <= totalRows; i++) {
-      positions.push(`${startPosition + step * i}%`);
-    }
-    return positions;
-  };
-
   useEffect(() => {
-    const token = localStorage.getItem('adminToken');
-    if (!token) {
-      router.push('/admin');
-      return;
-    }
-    fetchConfig();
-    // 从datastore加载已使用的号码
-    fetchUsedNumbers();
-    
-    // 从 localStorage 恢复待发送队列
-    try {
-      const savedQueue = localStorage.getItem('pendingLotteryResults');
-      if (savedQueue) {
-        const parsed = JSON.parse(savedQueue);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setPendingResults(parsed);
-          console.log(`从本地恢复了 ${parsed.length} 条待发送的抽奖结果`);
+    const run = async () => {
+      const auth = token();
+      if (!auth) { router.push('/admin'); return; }
+      try {
+        const oldQueue = localStorage.getItem('pendingLotteryResults');
+        if (oldQueue && oldQueue !== '[]') throw new Error('发现旧版未提交的中奖记录，请先备份并处理，暂不能抽奖。');
+        const res = await fetch('/api/lottery/config', { headers: { Authorization: `Bearer ${auth}` } });
+        if (!res.ok) throw new Error('读取抽奖配置失败，请重新登录');
+        setConfig((await res.json()).config);
+        let saved: StageState = initialStage;
+        const raw = localStorage.getItem(STAGE_STATE_KEY);
+        if (raw) saved = { ...initialStage, ...JSON.parse(raw) };
+        const pending = (await api('GET')).result as LotteryResult | null;
+        if (saved.request) {
+          if (pending && pending.id !== saved.request.id) throw new Error('数据库存在另一设备创建的未完成抽奖，请回到原设备完成揭晓。');
+          try {
+            const recovered = (await api('POST', saved.request)).result as LotteryResult;
+            // 请求可能在上次断开时尚未提交；重试新建的批次也必须保持隐藏。
+            const currentPending = (await api('GET')).result as LotteryResult | null;
+            const revealed = currentPending?.id === recovered.id ? (currentPending.revealedCount ?? 0) : recovered.numbers.length;
+            saved = { ...saved, rolling: false, result: recovered, revealed };
+          } catch (e) {
+            if (!(e instanceof ApiError) || e.status !== 400 || pending) throw e;
+            saved = { ...saved, request: null, result: null, revealed: 0, rolling: false };
+            setError(e.message);
+          }
+        } else if (pending) {
+          throw new Error('数据库存在另一设备创建的未完成抽奖，请回到原设备完成揭晓。');
         }
-      }
-    } catch (error) {
-      console.error('恢复待发送队列失败:', error);
-    }
-    
-    // 初始化音频
-    if (typeof window !== 'undefined') {
-      shutterAudioRef.current = new Audio('/shutter.mp3');
-      shutterAudioRef.current.preload = 'auto';
-      
-      // 预加载所有背景图片
-      const images = ['/max1.jpg', '/max2.jpg', '/max3.jpg', '/max4.jpg'];
-      images.forEach(src => {
-        const img = new Image();
-        img.src = src;
-      });
-      console.log('背景图片预加载完成');
-    }
+        if (saved.result) saved = { ...saved, revealOrder: restoreRevealOrder(saved.result.numbers.length, saved.revealed, saved.revealOrder) };
+        save(saved);
+        setReady(true);
+      } catch (e) { setError(e instanceof Error ? e.message : '恢复抽奖状态失败'); }
+    };
+    run();
+    // 场景恢复仅在页面打开时执行。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
-
-  // 键盘事件监听 - 空格键、Enter键和数字键控制
+  const scene = scenes[state.scene] || scenes[0];
+  const draft = state.drafts[String(state.scene)] || scene.draw;
+  const blocked = busy || !ready || masking;
+  const perform = async (action: () => Promise<void>) => {
+    if (lock.current || !ready || maskingRef.current) return;
+    lock.current = true; setBusy(true); setError('');
+    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : '操作失败，请重试'); }
+    finally { lock.current = false; setBusy(false); }
+  };
+  const start = () => {
+    if (blocked || lock.current || maskingRef.current || !scene.draw || state.result || state.request || !draft
+      || !draft.title.trim() || !Number.isSafeInteger(draft.count) || draft.count < 1 || draft.count > 100) return;
+    save({ ...state, rolling: true, revealOrder: createRevealOrder(draft.count) });
+  };
+  const draw = () => perform(async () => {
+    const s = stateRef.current;
+    if (!s.rolling || !draft || !config) return;
+    const request = s.request || { id: crypto.randomUUID(), config: { ...config, title: draft.title, count: draft.count } };
+    save({ ...s, request, revealOrder: restoreRevealOrder(request.config.count, 0, s.revealOrder) });
+    try {
+      const result = (await api('POST', request)).result as LotteryResult;
+      // 等服务器确认结果已持久化后才开始遮盖动画。
+      maskingRef.current = true;
+      setMaskingStartedAt(Date.now());
+      save({ ...stateRef.current, result, rolling: false, revealed: 0 });
+    } catch (e) {
+      // 明确拒绝意味着事务未提交；网络错误或服务器错误保留编号重试。
+      if (e instanceof ApiError && e.status === 400) save({ ...stateRef.current, request: null, rolling: false });
+      throw e;
+    }
+  });
+  const reveal = (all = false) => perform(async () => {
+    const s = stateRef.current;
+    if (!s.result) return;
+    const target = all ? s.result.numbers.length : Math.min(s.revealed + 1, s.result.numbers.length);
+    const remaining = target - s.revealed;
+    const started = performance.now();
+    for (let count = s.revealed + 1; count <= target; count++) {
+      if (!mounted.current) return;
+      // 每次只公开一个号码；失败即停，已确认的进度和位置均保留。
+      await api('PUT', { id: s.result.id, count });
+      if (!mounted.current) return;
+      save({ ...stateRef.current, revealed: count });
+      if (count < target) {
+        const nextAt = started + (count - s.revealed) * REVEAL_ALL_DURATION / Math.max(1, remaining - 1);
+        const delay = nextAt - performance.now();
+        if (delay > 0) await new Promise(resolve => window.setTimeout(resolve, delay));
+      }
+    }
+  });
+  const changeScene = (index: number) => {
+    if (blocked || lock.current || maskingRef.current || index < 0 || index >= scenes.length) return;
+    if (state.request && (!state.result || state.revealed < state.result.numbers.length)) { setError('请先完成本批号码揭晓，再切换场景。'); return; }
+    if (state.rolling && !confirm('当前正在滚动，确定离开此场景？')) return;
+    setError('');
+    const completed = { ...state.completed };
+    if (scenes[state.scene].draw && state.request && state.result && state.revealed === state.result.numbers.length) {
+      completed[String(state.scene)] = { request: state.request, result: state.result, revealed: state.revealed, revealOrder: state.revealOrder };
+    }
+    const previous = completed[String(index)];
+    const special = completed['15'];
+    save({ ...state, completed, scene: index, rolling: false, request: previous?.request ?? null,
+      result: previous?.result ?? (index === 16 ? special?.result : null) ?? null,
+      revealed: previous?.revealed ?? (index === 16 ? special?.revealed : 0) ?? 0,
+      revealOrder: previous?.revealOrder ?? (index === 16 ? special?.revealOrder : undefined) });
+  };
+  const redraw = () => perform(async () => {
+    const s = stateRef.current;
+    if (!s.result || s.result.numbers.length !== 1 || s.revealed !== 1) return;
+    if (!confirm(`确认号码 ${formatNumber(s.result.numbers[0])} 无效并重抽？原记录会保留，号码不会再次被抽中。`)) return;
+    await api('PUT', { id: s.result.id, action: 'invalidate', reason: '现场核验后确认无效，执行重抽' });
+    const completed = { ...s.completed }; delete completed[String(s.scene)];
+    save({ ...s, completed, request: null, result: null, revealed: 0, rolling: false, revealOrder: undefined });
+  });
   useEffect(() => {
-    const handleKeyPress = (e: KeyboardEvent) => {
-      // 数字键快捷方式：1=一等奖(3个), 2=二等奖(10个), 3=三等奖(15个), 0=特等奖(1个)
-      if (['Digit1', 'Digit2', 'Digit3', 'Digit0'].includes(e.code) && !rolling && !numberKeysLocked) {
-        e.preventDefault();
-        
-        // 根据按键设置临时配置
-        let tempConfig: LotteryConfig;
-        let tempTitle: string;
-        
-        if (e.code === 'Digit1') {
-          tempConfig = { ...config, count: 3 };
-          tempTitle = '一等奖';
-        } else if (e.code === 'Digit2') {
-          tempConfig = { ...config, count: 10 };
-          tempTitle = '二等奖';
-        } else if (e.code === 'Digit3') {
-          tempConfig = { ...config, count: 15 };
-          tempTitle = '三等奖';
-        } else { // Digit0
-          tempConfig = { ...config, count: 1 };
-          tempTitle = '特等奖';
-        }
-        
-        // 临时更新配置和标题（不保存到云端）
-        setConfig(tempConfig);
-        setLotteryTitle(tempTitle);
-        
-        // 锁定数字键
-        setNumberKeysLocked(true);
-        
-        // 开始抽奖（相当于按下空格）
-        startLottery();
-        
-        return;
-      }
-      
-      if (e.code === 'Space') {
-        e.preventDefault();
-        if (spaceDisabled) return;
-        if (rolling) {
-          // 定格中奖号码
-          stopLottery();
-          // 定格后禁用空格，启用Enter
-          setSpaceDisabled(true);
-          setEnterDisabled(false);
-        } else {
-          // 开始抽奖
-          startLottery();
-        }
-      } else if (e.code === 'Enter') {
-        e.preventDefault();
-        if (enterDisabled) return;
-        if (finalNumbers.length > 0) {
-          // 按下Enter后禁用Enter，禁用空格
-          setEnterDisabled(true);
-          setSpaceDisabled(true);
-          handleRefresh();
-          
-          // 延迟1.5秒后解锁数字键
-          setTimeout(() => {
-            setNumberKeysLocked(false);
-          }, 1500);
-        }
-      }
+    const listener = (event: KeyboardEvent) => {
+      if (event.repeat || (event.target instanceof HTMLElement && event.target.closest('input,textarea,select,button,a,[contenteditable="true"]'))) return;
+      if (event.key.toLowerCase() === 'h') { setControls(v => !v); return; }
+      if (event.key === 'ArrowRight') { event.preventDefault(); changeScene(state.scene + 1); }
+      if (event.key === 'ArrowLeft') { event.preventDefault(); changeScene(state.scene - 1); }
+      if (event.code === 'Space' && scene.draw && !maskingRef.current) { event.preventDefault(); if (!state.rolling && !state.result) start(); else if (state.rolling) draw(); else reveal(); }
     };
-    window.addEventListener('keydown', handleKeyPress);
-    return () => {
-      window.removeEventListener('keydown', handleKeyPress);
-    };
-  }, [rolling, finalNumbers, spaceDisabled, enterDisabled, numberKeysLocked, config]);
-
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  });
+  const updateDraft = (value: { title: string; count: number }) => save({ ...state, drafts: { ...state.drafts, [String(state.scene)]: value } });
+  const slots = state.result?.numbers.length ?? (draft?.count || 0);
   useEffect(() => {
-    if (rolling) {
-      // 根据配置的数量计算需要的行数
-      const requiredRows = calculateRows(config.count);
-      const initialNumbers: FlyingNumber[] = [];
-      const spacing = 15; // 每个数字间隔15%
-      
-      // 生成对应行数的数字流
-      for (let rowIndex = 0; rowIndex < requiredRows; rowIndex++) {
-        for (let i = 0; i < 100; i++) {
-          initialNumbers.push({
-            id: `row${rowIndex}-${i}`,
-            value: generateRandomNumber(), // 使用新函数生成不重复的号码
-            row: rowIndex,
-            position: i * spacing,
-            index: i,
-          });
-        }
-      }
-      
-      setFlyingNumbers(initialNumbers);
-      lastTimeRef.current = performance.now();
-
-      // 动画循环
-      const animate = (currentTime: number) => {
-        if (!lastTimeRef.current) {
-          lastTimeRef.current = currentTime;
-        }
-        
-        const deltaTime = currentTime - lastTimeRef.current;
-        lastTimeRef.current = currentTime;
-        
-        // 确保 deltaTime 合理（避免第一帧或标签页切换导致的异常值）
-        if (deltaTime > 0 && deltaTime < 100) {
-          setFlyingNumbers(prev => {
-            const updated = prev.map(num => {
-              const speed = 2; // 每帧移动2%（速度增加一倍）
-              const totalLength = 100 * spacing; // 总长度 1000%
-              
-              // row 0 和 2：从左向右
-              // 偶数行（0, 2, 4...）：从左向右
-              // 奇数行（1, 3, 5...）：从右向左
-              if (num.row % 2 === 0) {
-                let newPos = num.position + speed;
-                if (newPos > totalLength) {
-                  newPos = newPos - totalLength;
-                }
-                return { ...num, position: newPos };
-              } else {
-                let newPos = num.position - speed;
-                if (newPos < -spacing) {
-                  newPos = totalLength + newPos;
-                }
-                return { ...num, position: newPos };
-              }
-            });
-            return updated;
-          });
-        }
-        
-        animationFrameRef.current = requestAnimationFrame(animate);
-      };
-
-      animationFrameRef.current = requestAnimationFrame(animate);
-    } else {
-      // 停止时取消动画
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-      lastTimeRef.current = 0;
-    }
-    
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-  }, [rolling, config]);
-
-  const fetchConfig = async () => {
-    const token = localStorage.getItem('adminToken');
-    if (!token) return;
-
-    try {
-      const response = await fetch('/api/lottery/config', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const data = await response.json();
-      
-      // 安全地访问配置
-      if (data && data.config) {
-        setConfig(data.config);
-        // 从配置中读取奖项名称
-        if (data.config.title) {
-          setLotteryTitle(data.config.title);
-        }
-      }
-    } catch (error) {
-      console.error('获取抽奖配置失败:', error);
-    }
-  };
-
-  const fetchUsedNumbers = async () => {
-    const token = localStorage.getItem('adminToken');
-    if (!token) return;
-
-    try {
-      const response = await fetch('/api/lottery/history', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const data = await response.json();
-      
-      // 提取所有历史抽奖中的号码
-      const used = new Set<number>();
-      if (data.history && Array.isArray(data.history)) {
-        data.history.forEach((result: any) => {
-          if (result.numbers && Array.isArray(result.numbers)) {
-            result.numbers.forEach((num: number) => used.add(num));
-          }
-        });
-      }
-      setUsedNumbers(used);
-      console.log('已使用的号码:', Array.from(used));
-    } catch (error) {
-      console.error('获取历史抽奖失败:', error);
-    }
-  };
-
-  const startLottery = async () => {
-    // 先获取已使用的号码
-    await fetchUsedNumbers();
-    // 清空背景图片，确保下次停止时重新加载
-    setBackgroundImage('');
-    setRolling(true);
-    setFinalNumbers([]);
-  };
-
-  const handleRefresh = async () => {
-    // 触发拍立得飞出动画
-    if (finalNumbers.length > 0) {
-     
-      
-      setFlyingOut(true);
-      // 等待动画完成后清空内容
-      setTimeout(() => {
-        setFinalNumbers([]);
-        setFlyingNumbers([]);
-        setBackgroundImage('');
-        setFlyingOut(false);
-      }, 800); // 动画持续时间
-       // 立即刷新配置和已使用的号码，不要等动画完成
-      await fetchConfig();
-      await fetchUsedNumbers();
-      console.log('配置已刷新（第1次）');
-      
-      // 0.5秒后再次刷新，确保后台修改完全同步
-      setTimeout(async () => {
-        await fetchConfig();
-        await fetchUsedNumbers();
-        console.log('配置已刷新（第2次）');
-      }, 500);
-    } else {
-      // 如果没有内容，直接刷新
-      await fetchConfig();
-      await fetchUsedNumbers();
-      console.log('配置已刷新（第1次）');
-      
-      // 0.5秒后再次刷新
-      setTimeout(async () => {
-        await fetchConfig();
-        await fetchUsedNumbers();
-        console.log('配置已刷新（第2次）');
-      }, 500);
-    }
-  };
-
-  const stopLottery = () => {
-    // 播放快门音效
-    if (shutterAudioRef.current) {
-      shutterAudioRef.current.currentTime = 0; // 重置到开始
-      shutterAudioRef.current.play().catch(err => console.log('音效播放失败:', err));
-    }
-    
-    // 根据奖项名称选择背景图片
-    const imageMap: Record<string, string> = {
-      '特等奖': '/max1.jpg',
-      '二等奖': '/max2.jpg',
-      '三等奖': '/max3.jpg',
-      '一等奖': '/max4.jpg',
-    };
-    const selectedImage = imageMap[lotteryTitle] || '/max1.jpg';
-    
-    // 预加载图片
-    const img = new Image();
-    img.src = selectedImage;
-    img.onload = () => {
-      setBackgroundImage(selectedImage);
-      console.log('背景图片已加载:', selectedImage);
-    };
-    
-    // 延迟0.5秒后触发闪光和定格
-    setTimeout(() => {
-      // 触发白色闪光效果
-      setFlashEffect(true);
-      
-      // 从当前屏幕上的所有数字中选择，确保横向分散且不重复
-      const allNumbers = flyingNumbers.filter(num => 
-        num.position >= 10 && 
-        num.position <= 90 && 
-        !usedNumbers.has(num.value) // 排除已使用的号码
-      );
-      
-      // 按横向位置排序
-      const sortedByPosition = [...allNumbers].sort((a, b) => a.position - b.position);
-      
-      let selectedNumbers: FlyingNumber[] = [];
-      const step = Math.floor(sortedByPosition.length / config.count);
-      
-      // 从排序后的数组中等间隔选择数字
-      for (let i = 0; i < config.count && i * step < sortedByPosition.length; i++) {
-        selectedNumbers.push(sortedByPosition[i * step]);
-      }
-      
-      // 如果数量不够，补充随机数字（不重复）
-      const requiredRows = calculateRows(config.count);
-      while (selectedNumbers.length < config.count) {
-        const index = selectedNumbers.length;
-        const newNumber = generateRandomNumber();
-        selectedNumbers.push({
-          id: `final-${index}`,
-          value: newNumber,
-          row: index % requiredRows,
-          position: 20 + (index * 60 / config.count),
-          index: index,
-        });
-      }
-      
-      // 计算所有选中数字的整体中心，并调整位置使其左右居中
-      if (selectedNumbers.length > 0) {
-        // 使用3-2-3-2模式重新排列数字位置
-        const numbersPerRow = getNumbersPerRow(selectedNumbers.length);
-        const numberSpacing = 15; // 使用15%的间距
-        
-        let numberIndex = 0;
-        selectedNumbers = selectedNumbers.map((num, index) => {
-          // 找到当前数字所在的行
-          let rowIndex = 0;
-          let remainingNumbers = index;
-          for (let i = 0; i < numbersPerRow.length; i++) {
-            if (remainingNumbers < numbersPerRow[i]) {
-              rowIndex = i;
-              break;
-            }
-            remainingNumbers -= numbersPerRow[i];
-          }
-          
-          const posInRow = remainingNumbers;
-          const numbersInThisRow = numbersPerRow[rowIndex];
-          const thisRowWidth = (numbersInThisRow - 1) * numberSpacing;
-          
-          // 居中计算：从50%开始，减去半个行宽，再加上当前位置
-          const position = 50 - thisRowWidth / 2 + posInRow * numberSpacing;
-          
-          return {
-            ...num,
-            row: rowIndex,
-            position: position,
-          };
-        });
-      }
-      
-      // 在闪光效果期间停止滚动和设置最终数字
-      setTimeout(() => {
-        setRolling(false);
-        setFlyingNumbers(selectedNumbers); // 居中后的位置
-        setFinalNumbers(selectedNumbers.map(n => n.value));
-        setFlashEffect(false);
-        
-        // 停止动画
-        if (animationFrameRef.current) {
-          cancelAnimationFrame(animationFrameRef.current);
-        }
-        
-        submitLotteryResult(selectedNumbers.map(n => n.value));
-      }, 100);
-    }, 100); // 延迟0.2秒
-  };
-
-  const submitLotteryResult = async (numbers: number[]) => {
-    const token = localStorage.getItem('adminToken');
-    if (!token) return;
-
-    try {
-      const response = await fetch('/api/lottery/result', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ title: lotteryTitle, numbers }),
-      });
-
-      if (response.ok) {
-        console.log('抽奖结果已保存');
-      } else {
-        throw new Error(`HTTP ${response.status}`);
-      }
-    } catch (error) {
-      console.error('提交抽奖结果失败，加入队列:', error);
-      // 失败时加入待发送队列
-      setPendingResults(prev => [...prev, { title: lotteryTitle, numbers }]);
-    }
-  };
-
-  // 重试发送待发送的抽奖结果
-  const retryPendingResults = async () => {
-    if (pendingResults.length === 0) return;
-
-    const token = localStorage.getItem('adminToken');
-    if (!token) return;
-
-    console.log(`尝试发送队列中的 ${pendingResults.length} 条抽奖结果`);
-
-    // 取出第一条尝试发送
-    const [first, ...rest] = pendingResults;
-    
-    try {
-      const response = await fetch('/api/lottery/result', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ title: first.title, numbers: first.numbers }),
-      });
-
-      if (response.ok) {
-        console.log('队列中的抽奖结果发送成功');
-        // 成功后移除该项
-        setPendingResults(rest);
-      } else {
-        throw new Error(`HTTP ${response.status}`);
-      }
-    } catch (error) {
-      console.error('重试发送失败，保留在队列中:', error);
-      // 失败则保持队列不变（会在下次重试）
-    }
-  };
-
-  // 监听待发送队列，如果非空则启动定时重试
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   useEffect(() => {
-    // 保存队列到 localStorage
-    try {
-      if (pendingResults.length > 0) {
-        localStorage.setItem('pendingLotteryResults', JSON.stringify(pendingResults));
-      } else {
-        localStorage.removeItem('pendingLotteryResults');
-      }
-    } catch (error) {
-      console.error('保存待发送队列到本地失败:', error);
-    }
-
-    if (pendingResults.length > 0) {
-      // 队列非空，启动定时器（如果尚未启动）
-      if (!retryIntervalRef.current) {
-        console.log('启动重试定时器');
-        retryIntervalRef.current = setInterval(() => {
-          retryPendingResults();
-        }, 3000);
-      }
-    } else {
-      // 队列为空，清除定时器
-      if (retryIntervalRef.current) {
-        console.log('队列已清空，停止重试定时器');
-        clearInterval(retryIntervalRef.current);
-        retryIntervalRef.current = null;
-      }
-    }
-
-    // 清理函数
-    return () => {
-      if (retryIntervalRef.current) {
-        clearInterval(retryIntervalRef.current);
-        retryIntervalRef.current = null;
-      }
-    };
-  }, [pendingResults]);
-
-  // 监听拍立得动画结束，解除空格禁用（必须在组件顶层）
-  useEffect(() => {
-    if (!flyingOut) {
-      setSpaceDisabled(false);
-    }
-  }, [flyingOut]);
-
-  return (
-    <div 
-      className="min-h-screen flex items-center justify-center relative overflow-hidden"
-      style={{
-        backgroundImage: 'url(/lotterybg.jpg)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
-    >
-      {/* 暗化遮罩层 - 开始抽奖时变暗 */}
-      <div 
-        className={`absolute inset-0 bg-black transition-opacity duration-500 ${
-          rolling ? 'opacity-60' : 'opacity-0'
-        }`}
-        style={{ pointerEvents: 'none' }}
-      />
-
-      {/* 高亮闪光效果 - 高亮度高透明度 */}
-      <div 
-        className={`absolute inset-0 bg-white transition-opacity ${
-          flashEffect ? 'opacity-95' : 'opacity-0'
-        }`}
-        style={{ 
-          pointerEvents: 'none',
-          transitionDuration: flashEffect ? '0ms' : '100ms',
-          transitionTimingFunction: 'ease-out',
-          filter: 'brightness(3)'
-        }}
-      />
-      {/* 停止时显示拍立得背景 - 包裹所有数字 */}
-      {!rolling && finalNumbers.length > 0 && (
-        (() => {
-          // 使用与取景框一致的尺寸
-          // 取景框是屏幕宽度的60%，高度的50%
-          const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1920;
-          const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 1080;
-          
-          // 黑框尺寸与取景框一致
-          const frameWidth = viewportWidth * 0.6; // 60% 宽度
-          const frameHeight = viewportHeight * 0.5; // 50% 高度
-          
-          // 保持99:62的宽高比调整
-          const targetRatio = 99 / 62;
-          let finalBlackWidth = frameWidth;
-          let finalBlackHeight = frameHeight;
-          
-          if (frameWidth / frameHeight > targetRatio) {
-            // 太宽，减小宽度以保持比例
-            finalBlackWidth = frameHeight * targetRatio;
-          } else {
-            // 太窄，减小高度以保持比例
-            finalBlackHeight = frameWidth / targetRatio;
-          }
-          
-          // 白色边框尺寸
-          let leftWhite = 4.5 / 62 * finalBlackHeight;
-          let rightWhite = 4.5 / 62 * finalBlackHeight;
-          let topWhite = 4.5 / 62 * finalBlackHeight;
-          let bottomWhite = 4.5 / 62 * finalBlackHeight;
-          
-          // 白色框总尺寸
-          let whiteFrameWidth = finalBlackWidth + leftWhite + rightWhite;
-          let whiteFrameHeight = finalBlackHeight + topWhite + bottomWhite;
-          
-          // 向上偏移量改为0，让拍立得居中
-          const verticalOffset = 30;
-          
-          return (
-            <>
-              {/* 白色外框 */}
-              <div 
-                className={`absolute pointer-events-none ${flyingOut ? 'fly-out' : ''}`}
-                style={{
-                  left: '50%',
-                  top: `calc(50% + ${verticalOffset}px)`,
-                  transform: 'translate(-50%, -50%)',
-                  width: `${whiteFrameWidth}px`,
-                  height: `${whiteFrameHeight}px`,
-                  backgroundColor: 'white',
-                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
-                  zIndex: flyingOut ? 50 : 1,
-                }}
-              />
-              
-              {/* 背景图片层 - 在黑框下方 */}
-              <div 
-                className={`absolute pointer-events-none ${flyingOut ? 'fly-out' : ''}`}
-                style={{
-                  left: '50%',
-                  top: `calc(50% + ${verticalOffset}px)`,
-                  transform: 'translate(-50%, -50%)',
-                  width: `${finalBlackWidth}px`,
-                  height: `${finalBlackHeight}px`,
-                  backgroundImage: `url(${backgroundImage})`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                  zIndex: flyingOut ? 51 : 2,
-                }}
-              />
-              
-              {/* 黑色内框 - 半透明 */}
-              <div 
-                className={`absolute pointer-events-none ${flyingOut ? 'fly-out' : ''}`}
-                style={{
-                  left: '50%',
-                  top: `calc(50% + ${verticalOffset}px)`,
-                  transform: 'translate(-50%, -50%)',
-                  width: `${finalBlackWidth}px`,
-                  height: `${finalBlackHeight}px`,
-                  backgroundColor: 'black',
-                  opacity: 0.5,
-                  zIndex: flyingOut ? 52 : 3,
-                }}
-              />
-              
-              {/* 底部白色矩形 */}
-              <div 
-                className={`absolute pointer-events-none flex items-center justify-between px-6 ${flyingOut ? 'fly-out-bottom' : ''}`}
-                style={{
-                  left: '50%',
-                  top: `calc(50% + ${verticalOffset}px + ${finalBlackHeight / 2}px)`,
-                  transform: 'translate(-50%, -100%)',
-                  width: `${whiteFrameWidth}px`,
-                  height: `${(15 / 62) * finalBlackHeight}px`,
-                  backgroundColor: 'white',
-                  zIndex: flyingOut ? 53 : 4,
-                  '--offset': `${finalBlackHeight / 2}px`,
-                } as React.CSSProperties & { '--offset': string }}
-              >
-                {/* 左侧文字 - 掠影2025 */}
-                <span 
-                  className="font-bold text-gray-700"
-                  style={{
-                    fontSize: `${(4 / 62) * finalBlackHeight}px`,
-                    fontFamily: 'serif',
-                  }}
-                >
-                  掠影2025
-                </span>
-                
-                {/* 中间文字 - 日期 */}
-                <span 
-                  className="font-bold text-gray-700 absolute left-1/2 transform -translate-x-1/2"
-                  style={{
-                    fontSize: `${(4 / 62) * finalBlackHeight}px`,
-                    fontFamily: 'serif',
-                  }}
-                >
-                  {new Date().toISOString().split('T')[0]}
-                </span>
-                
-                {/* 右侧文字 - 奖项名称 */}
-                <span 
-                  className="font-bold text-gray-700"
-                  style={{
-                    fontSize: `${(4 / 62) * finalBlackHeight}px`,
-                    fontFamily: 'serif',
-                  }}
-                >
-                  {lotteryTitle}
-                </span>
-              </div>
-            </>
-          );
-        })()
-      )}
-      
-      {/* 滚动的数字 - 动态行数 */}
-      {flyingNumbers.map((num) => {
-        // 根据当前配置计算行位置
-        const totalRows = rolling ? calculateRows(config.count) : calculateRows(finalNumbers.length);
-        const rowPositions = getRowPositions(totalRows);
-        
-        // 计算偏移量让数字相对于背景图居中
-        const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 1080;
-        const frameHeight = viewportHeight * 0.5; // 50% 高度
-        const bottomRectHeight = (15 / 62) * frameHeight; // 底部长方形高度
-        const topWhiteHeight = (4.5 / 62) * frameHeight; // 上边框高度
-        const verticalOffset = -(bottomRectHeight / 2) + (topWhiteHeight / 2); // 先向上移动底部长方形高度的一半，再向下移动上边框高度的一半
-        
-        return (
-          <div
-            key={num.id}
-            className={`absolute text-4xl font-bold ${flyingOut && !rolling ? 'fly-out-num' : ''}`}
-            style={{
-              top: `calc(${rowPositions[num.row % rowPositions.length]} + ${verticalOffset}px)`,
-              left: `${num.position}%`,
-              transform: 'translateX(-50%)',
-              transition: rolling ? 'none' : 'opacity 0.3s, text-shadow 0.3s',
-              zIndex: flyingOut && !rolling ? 54 : (rolling ? 'auto' : 10),
-            }}
-          >
-            {/* 数字本身 */}
-            <span
-              style={{
-                position: 'relative',
-                color: rolling ? 'white' : 'white',
-                opacity: rolling ? 0.7 : 1,
-                textShadow: rolling ? 'none' : '0 0 20px rgba(255, 255, 255, 0.5), 0 0 40px rgba(255, 215, 0, 0.8)',
-                fontFamily: 'monospace', // 使用等宽字体确保对齐
-              }}
-            >
-              {formatNumber(num.value)}
-            </span>
-          </div>
-        );
-      })}
-
-      {/* 录制指示器 - 左上角 */}
-      {rolling && (
-        <div className="absolute top-8 left-8 flex items-center gap-3 z-20">
-          <div 
-            className="w-4 h-4 bg-red-600 rounded-full"
-            style={{ animation: 'rec-blink 1s step-end infinite' }}
-          ></div>
-          <span 
-            className="text-red-600 text-4xl"
-            style={{ 
-              fontWeight: 900,
-              fontFamily: 'monospace',
-              animation: 'rec-blink 1s step-end infinite'
-            }}
-          >
-            REC
-          </span>
+    if (maskingStartedAt === null) return;
+    const timer = window.setTimeout(() => {
+      maskingRef.current = false;
+      setMaskingStartedAt(null);
+    }, Math.max(0, maskingStartedAt + MASK_DURATION - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [maskingStartedAt]);
+  const view = useMemo(() => ready && config ? buildStageView(state, config, maskingStartedAt) : null,
+    [ready, config, state, maskingStartedAt]);
+  useStageBroadcast(view);
+  const openScreen = () => {
+    const screen = window.open('/admin/lottery/screen', 'wujian-lottery-screen', 'popup,width=1280,height=720');
+    if (!screen) setError('大屏窗口未能打开，请允许此网站弹出窗口后重试。');
+  };
+  return <>
+    <LotteryStage view={view} />
+    {controls && <aside className="controls">
+      <div className="control-head"><strong>抽奖导播台</strong><button onClick={() => setControls(false)}>隐藏 H</button></div>
+      <div className="buttons nav"><button onClick={openScreen}>打开纯净大屏 ↗</button></div>
+      <p>将新窗口移到投影屏并按 F11 全屏；本窗口保留在电脑上操作。请使用同一浏览器、同一网站地址，并保持导播台打开。</p>
+      <label>场景 <select value={state.scene} onChange={e => changeScene(Number(e.target.value))} disabled={blocked}>{scenes.map((s, i) => <option value={i} key={s.label}>{String(i + 1).padStart(2, '0')} · {s.label}</option>)}</select></label>
+      <p>{scene.cue}</p>
+      {scene.draw && draft && <>
+        <div className="fields"><label>奖项<input value={draft.title} disabled={blocked || state.rolling || !!state.request} onChange={e => updateDraft({ ...draft, title: e.target.value })}/></label><label>人数<input type="number" min="1" max="100" value={draft.count || ''} disabled={blocked || state.rolling || !!state.request} onChange={e => updateDraft({ ...draft, count: Number(e.target.value) })}/></label></div>
+        <p>号码范围：{config ? `${config.minNumber}–${config.maxNumber}` : '读取中'}；可在抽奖设置中修改。</p>
+        <div className="buttons">
+          <button disabled={blocked || state.rolling || !!state.request || !!state.result || !draft.title.trim() || !Number.isSafeInteger(draft.count) || draft.count < 1 || draft.count > 100} onClick={start}>开始滚动</button>
+          <button disabled={blocked || !state.rolling} onClick={draw}>{state.request ? '重试确认' : '确认抽取'}</button>
+          <button disabled={blocked || !state.result || state.revealed >= slots} onClick={() => reveal()}>随机揭晓下一个</button>
+          <button disabled={blocked || !state.result || state.revealed >= slots} onClick={() => reveal(true)}>随机揭晓全部</button>
+          {state.scene === 15 && <button className="danger" disabled={blocked || !state.result || slots !== 1 || state.revealed !== 1} onClick={redraw}>核验无效 · 重抽</button>}
         </div>
-      )}
-
-      {/* 对焦框 - 屏幕中央 */}
-      {rolling && (
-        <div 
-          className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none"
-          style={{
-            width: '60%',
-            height: '50%',
-            border: '2px solid rgba(139, 69, 19, 0.6)',
-            animation: 'focus-blink 3s ease-in-out infinite',
-          }}
-        >
-          {/* 对焦框四角 */}
-          <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-amber-700"></div>
-          <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-amber-700"></div>
-          <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-amber-700"></div>
-          <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-amber-700"></div>
-        </div>
-      )}
-
-      {/* 动画样式 */}
-      <style jsx>{`
-        @keyframes rec-blink {
-          0%, 49% {
-            opacity: 1;
-          }
-          50%, 100% {
-            opacity: 0;
-          }
-        }
-        
-        @keyframes focus-blink {
-          0%, 100% {
-            opacity: 0.4;
-          }
-          50% {
-            opacity: 0.8;
-          }
-        }
-        
-        @keyframes fade-in {
-          from {
-            opacity: 0;
-            transform: scale(0.8);
-          }
-          to {
-            opacity: 1;
-            transform: scale(1);
-          }
-        }
-
-        @keyframes bounce-in {
-          0% {
-            opacity: 0;
-            transform: scale(0) rotate(-180deg);
-          }
-          50% {
-            transform: scale(1.15) rotate(10deg);
-          }
-          100% {
-            opacity: 1;
-            transform: scale(1) rotate(0deg);
-          }
-        }
-
-        @keyframes fly-out-animation {
-          0% {
-            top: calc(50% + 30px);
-          }
-          100% {
-            top: -120vh;
-          }
-        }
-
-        @keyframes fly-out-bottom {
-          0% {
-            top: calc(50% + 30px + var(--offset));
-          }
-          100% {
-            top: calc(-120vh + var(--offset));
-          }
-        }
-
-        @keyframes fly-out-number {
-          0% {
-            transform: translateX(-50%) translateY(0);
-          }
-          100% {
-            transform: translateX(-50%) translateY(-175vh);
-          }
-        }
-
-        .fly-out {
-          animation: fly-out-animation 0.8s linear forwards;
-        }
-
-        .fly-out-bottom {
-          animation: fly-out-bottom 0.8s linear forwards;
-        }
-
-        .fly-out-num {
-          animation: fly-out-number 0.8s linear forwards;
-        }
-
-        .animate-fade-in {
-          animation: fade-in 0.3s ease-out forwards;
-        }
-
-        .animate-bounce-in {
-          animation: bounce-in 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
-          opacity: 0;
-        }
-      `}</style>
-    </div>
-  );
+      </>}
+      {scene.draw && <p>逐个随机点亮号码；揭晓全部通常约 1.2 秒，网络较慢时会延长。</p>}
+      {error && <p role="alert" className="error">{error}</p>}
+      <div className="buttons nav"><button disabled={blocked || state.scene === 0} onClick={() => changeScene(state.scene - 1)}>上一场</button><button disabled={blocked || state.scene === scenes.length - 1} onClick={() => changeScene(state.scene + 1)}>下一场</button></div>
+      <p>空格：开始 / 确认 / 揭晓下一个<br/>方向键：切换场景　H：显示 / 隐藏控制</p>
+    </aside>}
+    {!controls && <button className="show-controls" onClick={() => setControls(true)}>控制 H</button>}
+    <style jsx>{`
+      .controls{position:fixed;right:12px;top:12px;z-index:10;background:#101a18ee;color:#edf5f0;border:1px solid #50645d;border-radius:8px;padding:14px;width:min(340px,95vw);max-height:95vh;overflow:auto;font:14px system-ui}.control-head{display:flex;justify-content:space-between;align-items:center;font-size:16px}.controls label{display:block;margin-top:8px}.controls select,.controls input{display:block;width:100%;background:#1c2d27;border:1px solid #52665c;color:white;padding:7px;border-radius:4px}.controls p{line-height:1.5;color:#b5c8bf;font-size:12px;margin:10px 0}.fields{display:grid;grid-template-columns:2fr 1fr;gap:8px}.buttons{display:flex;gap:6px;flex-wrap:wrap}.controls button,.show-controls{background:#25463a;border:1px solid #5d8976;color:#fff;padding:7px 10px;border-radius:4px}.controls button:disabled{opacity:.4}.controls .danger{background:#612b2b}.controls .error{color:#ff9c9c;font-size:14px}.nav{margin-top:12px}.show-controls{position:fixed;right:10px;top:10px;z-index:10;opacity:.5}
+    `}</style>
+  </>;
 }
-

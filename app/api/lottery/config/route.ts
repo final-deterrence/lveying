@@ -52,9 +52,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, config: updatedConfig });
   } catch (error) {
-    return NextResponse.json(
-      { error: '更新抽奖配置失败' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : '更新抽奖配置失败' }, { status: 400 });
   }
 }

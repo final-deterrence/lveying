@@ -6,6 +6,9 @@ node_modules/
 # 数据文件（持久化存储）
 data/
 *.json.backup
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 
 # 测试
 coverage/
@@ -13,6 +16,7 @@ coverage/
 
 # Next.js
 .next/
+.next-dev/
 out/
 build
 dist

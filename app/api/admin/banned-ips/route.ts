@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyToken, getTokenFromRequest } from '@/lib/auth';
 import { dataStore } from '@/lib/dataStore';
+import { canonicalIp } from '@/lib/ip';
 
 // 禁用缓存
 export const dynamic = 'force-dynamic';
@@ -36,14 +37,8 @@ export async function POST(request: Request) {
     const { ip: rawIp } = await request.json();
     if (!rawIp || typeof rawIp !== 'string') return NextResponse.json({ error: '参数错误' }, { status: 400 });
 
-    const normalizeIp = (ipStr: string) => {
-      let ip = ipStr.replace(/^\[|\]$/g, '');
-      ip = ip.split('%')[0];
-      const match = ip.match(/(?:.*::ffff:)?(\d+\.\d+\.\d+\.\d+)$/i);
-      if (match) return match[1];
-      return ip;
-    };
-    const ip = normalizeIp(rawIp);
+    const ip = canonicalIp(rawIp);
+    if (!ip) return NextResponse.json({ error: '无效的 IP 地址' }, { status: 400 });
   const result = dataStore.banIp(ip);
   console.log('👮 封禁请求', { rawIp, ip, result });
   if (result.success) return NextResponse.json({ success: true, ip, affected: result.affected });
@@ -67,14 +62,8 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ success: true });
     }
 
-    const normalizeIp = (ipStr: string) => {
-      let ip = ipStr.replace(/^\[|\]$/g, '');
-      ip = ip.split('%')[0];
-      const match = ip.match(/(?:.*::ffff:)?(\d+\.\d+\.\d+\.\d+)$/i);
-      if (match) return match[1];
-      return ip;
-    };
-    const ip = normalizeIp(rawIp);
+    const ip = typeof rawIp === 'string' ? canonicalIp(rawIp) : null;
+    if (!ip) return NextResponse.json({ error: '无效的 IP 地址' }, { status: 400 });
   const success = dataStore.unbanIp(ip);
   console.log('👮 解封请求', { rawIp, ip, success });
   if (success) return NextResponse.json({ success: true, ip });
