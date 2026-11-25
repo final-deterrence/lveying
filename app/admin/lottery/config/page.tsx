@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { LotteryConfig, LotteryResult } from '@/types';
 import * as XLSX from 'xlsx';
-import { STAGE_STATE_KEY, STAGE_VIEW_KEY } from '@/lib/lotteryStage';
+import { awards, awardKeys, STAGE_STATE_KEY, STAGE_VIEW_KEY } from '@/lib/lotteryStage';
 
 export default function LotteryConfigPage() {
   const [config, setConfig] = useState<LotteryConfig>({
@@ -75,7 +75,7 @@ export default function LotteryConfigPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(config),
+        body: JSON.stringify({ ...config, count: Math.min(config.count, config.maxNumber - config.minNumber + 1) }),
       });
 
       if (response.ok) {
@@ -261,18 +261,13 @@ export default function LotteryConfigPage() {
                       className="w-full px-4 py-2 backdrop-blur-sm bg-white/50 border border-white/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800"
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2 drop-shadow-lg">
-                      抽取数量
-                    </label>
-                    <input
-                      type="number"
-                      value={config.count}
-                      onChange={(e) =>
-                        setConfig({ ...config, count: parseInt(e.target.value) })
-                      }
-                      className="w-full px-4 py-2 backdrop-blur-sm bg-white/50 border border-white/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800"
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    {awardKeys.map(key => <label key={key} className="text-sm font-medium text-gray-700">
+                      {awards[key].title}名额
+                      <input type="number" min="1" max="100" value={config.awardCounts?.[key] ?? awards[key].count}
+                        onChange={e => setConfig({ ...config, awardCounts: { ...config.awardCounts, [key]: Number(e.target.value) } })}
+                        className="mt-2 w-full rounded-lg border border-white/30 bg-white/50 px-4 py-2 text-gray-800" />
+                    </label>)}
                   </div>
                   <button
                     onClick={updateConfig}
@@ -283,55 +278,6 @@ export default function LotteryConfigPage() {
                 </div>
               </div>
 
-              {/* 奖项名称设置 */}
-              <div className="backdrop-blur-md bg-white/20 border border-white/30 rounded-xl p-6">
-                <h2 className="text-xl font-bold text-gray-800 mb-4 drop-shadow-lg">
-                  奖项名称
-                </h2>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2 drop-shadow-lg">
-                      当前奖项
-                    </label>
-                    <input
-                      type="text"
-                      value={config.title || ''}
-                      onChange={(e) => setConfig({ ...config, title: e.target.value })}
-                      className="w-full px-4 py-2 backdrop-blur-sm bg-white/50 border border-white/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800"
-                      placeholder="例如：一等奖"
-                    />
-                  </div>
-                  <div className="flex gap-2 flex-wrap">
-                    <button
-                      onClick={() => setConfig({ ...config, title: '特等奖' })}
-                      className="px-4 py-2 backdrop-blur-md bg-white/20 border border-white/30 text-gray-800 rounded-lg hover:bg-white/30 transition-all"
-                    >
-                      特等奖
-                    </button>
-                    <button
-                      onClick={() => setConfig({ ...config, title: '一等奖' })}
-                      className="px-4 py-2 backdrop-blur-md bg-white/20 border border-white/30 text-gray-800 rounded-lg hover:bg-white/30 transition-all"
-                    >
-                      一等奖
-                    </button>
-                    <button
-                      onClick={() => setConfig({ ...config, title: '二等奖' })}
-                      className="px-4 py-2 backdrop-blur-md bg-white/20 border border-white/30 text-gray-800 rounded-lg hover:bg-white/30 transition-all"
-                    >
-                      二等奖
-                    </button>
-                    <button
-                      onClick={() => setConfig({ ...config, title: '三等奖' })}
-                      className="px-4 py-2 backdrop-blur-md bg-white/20 border border-white/30 text-gray-800 rounded-lg hover:bg-white/30 transition-all"
-                    >
-                      三等奖
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-600">
-                    修改后点击上方&quot;保存配置&quot;按钮统一保存
-                  </p>
-                </div>
-              </div>
             </div>
 
             {/* 右侧：抽奖历史 */}

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>无间道 · 抽奖大屏</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #080e10; }
+    body { display: grid; place-items: center; }
+    main { position: relative; width: min(100vw, 177.77778vh); aspect-ratio: 16 / 9; }
+    canvas { display: block; width: 100%; height: 100%; }
+    .sr { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(100%); }
+  </style>
+  <script defer src="./mission1-reader.js"></script>
+  <script type="module" src="./film.js"></script>
+</head>
+<body>
+  <main><canvas role="img" aria-label="无间道抽奖动画"></canvas><div class="sr"><p role="status"></p><ol aria-label="中奖号码"></ol></div></main>
+</body>
+</html>

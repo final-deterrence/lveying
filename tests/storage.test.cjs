@@ -13,7 +13,7 @@ const root = path.resolve(__dirname, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'lveying-sqlite-test-'));
 const compiled = path.join(temp, 'compiled');
 fs.mkdirSync(compiled);
-fs.symlinkSync(path.join(root, 'node_modules'), path.join(compiled, 'node_modules'), 'dir');
+fs.symlinkSync(path.join(root, 'node_modules'), path.join(compiled, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
 const files = [
   'lib/defaultData.ts', 'lib/ip.ts', 'lib/database.ts', 'lib/dataStore.ts', 'lib/userManager.ts', 'lib/auth.ts',
   'lib/danmakuPolicy.ts', 'lib/danmakuGuard.ts', 'lib/lotteryStage.ts', 'app/api/admin/banned-ips/route.ts',
@@ -559,6 +559,32 @@ test('逐个揭晓进度持久化、单调递增，作废记录保留且不再�
   assert.equal(store.getAllLotteryResults(true).find(r => r.id === 'single').invalidReason, '核验失败');
   const retry = store.drawLottery('retry', { ...config, count: 1 });
   assert.equal(new Set([...batch.numbers, ...single.numbers, ...retry.numbers]).size, 4);
+});
+
+test('四档现场开奖一次提交即公开，两个导播台和刷新均读取同一批结果', () => {
+  fixture();
+  const store = new DataStore();
+  const config = { minNumber: 0, maxNumber: 43, count: 30, title: '三等奖' };
+  store.updateLotteryConfig({ awardCounts: { third: 30, second: 10, first: 3, grand: 1 } });
+  assert.equal(new DataStore().getLotteryConfig().awardCounts.third, 30);
+  assert.throws(() => store.updateLotteryConfig({ awardCounts: { grand: 0 } }), /名额/);
+  const first = store.drawLottery('third-director', config, 'third');
+  assert.deepEqual(new DataStore().getLatestLotteryResult().numbers, first.numbers);
+  assert.deepEqual(store.drawLottery('third-retry', { ...config, count: 1 }, 'third'), first);
+  const all = [...first.numbers];
+  for (const [key, title, count] of [['second', '二等奖', 10], ['first', '一等奖', 3], ['grand', '特等奖', 1]]) {
+    all.push(...store.drawLottery(key, { ...config, title, count }, key).numbers);
+  }
+  assert.equal(store.getAllLotteryResults().length, 4);
+  assert.equal(new Set(all).size, 44);
+  assert.deepEqual(new DataStore().getStageAwards().third, first);
+  assert.equal(store.getUnpublishedLotteryResult(), null);
+  store.invalidateLotteryResult('grand', '核券无效');
+  assert.equal(store.getStageAwards().grand, undefined);
+  assert.throws(() => store.drawLottery('grand', { ...config, title: '特等奖', count: 1 }, 'grand'), /失效/);
+  assert.throws(() => store.drawLottery('new-grand', { ...config, title: '特等奖', count: 1 }, 'grand'), /不足/);
+  store.clearAllLotteryResults();
+  assert.deepEqual(store.getStageAwards(), {});
 });
 
 test('随机揭晓位置不重复，部分揭晓、刷新和全部揭晓均保持已有位置', () => {

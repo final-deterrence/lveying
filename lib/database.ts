@@ -88,6 +88,10 @@ function initialize(db: DatabaseSync, dataDir: string): void {
         result_id TEXT PRIMARY KEY REFERENCES lottery_results(id) ON DELETE CASCADE,
         config TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS lottery_stage_awards (
+        award TEXT PRIMARY KEY,
+        result_id TEXT NOT NULL UNIQUE REFERENCES lottery_results(id) ON DELETE CASCADE
+      );
       CREATE TABLE IF NOT EXISTS lottery_reveal_progress (
         result_id TEXT PRIMARY KEY REFERENCES lottery_results(id) ON DELETE CASCADE,
         revealed_count INTEGER NOT NULL DEFAULT 0

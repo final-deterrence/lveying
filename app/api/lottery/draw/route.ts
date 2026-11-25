@@ -11,17 +11,24 @@ function authorized(request: Request) {
 
 export async function GET(request: Request) {
   if (!authorized(request)) return NextResponse.json({ error: '未授权' }, { status: 401 });
-  return NextResponse.json({ result: dataStore.getUnpublishedLotteryResult() });
+  return NextResponse.json({
+    result: dataStore.getUnpublishedLotteryResult(),
+    awards: dataStore.getStageAwards(),
+    usedNumbers: dataStore.getAllLotteryResults(true).flatMap(batch => batch.numbers),
+  });
 }
 
 export async function POST(request: Request) {
   if (!authorized(request)) return NextResponse.json({ error: '未授权' }, { status: 401 });
   try {
-    const { id, config } = await request.json();
+    const { id, config, award } = await request.json();
     if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) || !config || typeof config !== 'object') {
       return NextResponse.json({ error: '无效的抽奖请求' }, { status: 400 });
     }
-    return NextResponse.json({ result: dataStore.drawLottery(id, config) });
+    if (award !== undefined && !['third', 'second', 'first', 'grand'].includes(award)) {
+      return NextResponse.json({ error: '未知奖项' }, { status: 400 });
+    }
+    return NextResponse.json({ result: dataStore.drawLottery(id, config, award) });
   } catch (error) {
     if (error instanceof LotteryError) return NextResponse.json({ error: error.message }, { status: 400 });
     console.error('抽奖失败:', error);

@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { Program, Danmaku, LotteryConfig, LotteryResult, DanmakuPage, DanmakuFilter, DanmakuReview } from '../types';
+import type { Program, Danmaku, LotteryConfig, LotteryResult, StageAward, DanmakuPage, DanmakuFilter, DanmakuReview } from '../types';
 import { defaultData, type DataStoreState } from './defaultData';
 import { getDatabase, insertProgram, insertDanmaku, normalizeIp, transaction } from './database';
 
@@ -185,6 +185,11 @@ export class DataStore {
     return transaction(this.db, () => {
       const updated = { ...this.getLotteryConfig(), ...config };
       validateLotteryConfig(updated);
+      if (updated.awardCounts !== undefined && (!updated.awardCounts || typeof updated.awardCounts !== 'object'
+        || Array.isArray(updated.awardCounts) || Object.entries(updated.awardCounts).some(([key, n]) =>
+          !['third', 'second', 'first', 'grand'].includes(key) || !Number.isSafeInteger(n) || n < 1 || n > 100))) {
+        throw new LotteryError('每档奖项的名额须为 1 至 100 的整数');
+      }
       this.db.prepare("UPDATE settings SET value = ? WHERE key = 'lottery_config'").run(JSON.stringify(updated));
       return updated;
     });
@@ -197,7 +202,12 @@ export class DataStore {
     return result;
   }
 
-  drawLottery(id: string, config: LotteryConfig): LotteryResult {
+  getStageAwards(): Partial<Record<StageAward, LotteryResult>> {
+    const rows = this.db.prepare('SELECT a.award, r.* FROM lottery_stage_awards a JOIN lottery_results r ON r.id = a.result_id').all();
+    return Object.fromEntries(rows.map(row => [String(row.award), resultFromRow(row)]));
+  }
+
+  drawLottery(id: string, config: LotteryConfig, award?: StageAward): LotteryResult {
     validateLotteryConfig(config);
     const requestConfig = JSON.stringify({ minNumber: config.minNumber, maxNumber: config.maxNumber, count: config.count, title: config.title!.trim() });
     return transaction(this.db, () => {
@@ -206,7 +216,15 @@ export class DataStore {
         const result = resultFromRow(existing);
         const previous = this.db.prepare('SELECT config FROM lottery_draw_requests WHERE result_id = ?').get(id);
         if (!previous || previous.config !== requestConfig) throw new LotteryError('抽奖请求编号冲突');
+        if (award && !this.db.prepare('SELECT 1 FROM lottery_stage_awards WHERE award = ? AND result_id = ?').get(award, id)) {
+          throw new LotteryError('该请求已失效，请刷新导播台');
+        }
         return result;
+      }
+      // 两个导播窗口同时确认同一档时，后到的请求读取已提交的那一批。
+      if (award) {
+        const recorded = this.db.prepare('SELECT r.* FROM lottery_stage_awards a JOIN lottery_results r ON r.id = a.result_id WHERE a.award = ?').get(award);
+        if (recorded) return resultFromRow(recorded);
       }
       if (this.db.prepare('SELECT 1 FROM lottery_unpublished LIMIT 1').get()) throw new LotteryError('已有未揭晓的抽奖结果，请先恢复并揭晓');
       const used = new Set<number>();
@@ -239,8 +257,9 @@ export class DataStore {
       const result = { id, title: config.title!.trim(), numbers, timestamp: Date.now() };
       this.db.prepare('INSERT INTO lottery_results (id, title, numbers, timestamp) VALUES (?, ?, ?, ?)')
         .run(id, result.title, JSON.stringify(numbers), result.timestamp);
-      this.db.prepare('INSERT INTO lottery_unpublished VALUES (?)').run(id);
-      this.db.prepare('INSERT INTO lottery_reveal_progress VALUES (?, 0)').run(id);
+      if (award) this.db.prepare('INSERT INTO lottery_stage_awards VALUES (?, ?)').run(award, id);
+      else this.db.prepare('INSERT INTO lottery_unpublished VALUES (?)').run(id);
+      this.db.prepare('INSERT INTO lottery_reveal_progress VALUES (?, ?)').run(id, award ? numbers.length : 0);
       this.db.prepare('INSERT INTO lottery_draw_requests VALUES (?, ?)').run(id, requestConfig);
       return result;
     });
@@ -271,8 +290,12 @@ export class DataStore {
     return transaction(this.db, () => {
       const row = this.db.prepare('SELECT numbers FROM lottery_results WHERE id = ?').get(id);
       if (!row) return false;
+      if (this.db.prepare("SELECT 1 FROM lottery_stage_awards WHERE result_id = ? AND award <> 'grand'").get(id)) {
+        throw new LotteryError('只有单人特等奖可以现场核券重抽');
+      }
       if ((JSON.parse(String(row.numbers)) as number[]).length !== 1 || this.db.prepare('SELECT 1 FROM lottery_unpublished WHERE result_id = ?').get(id)) throw new LotteryError('只能作废已全部揭晓的单人抽奖结果');
       this.db.prepare('INSERT OR IGNORE INTO lottery_invalid_results VALUES (?, ?, ?)').run(id, reason.trim(), Date.now());
+      this.db.prepare('DELETE FROM lottery_stage_awards WHERE result_id = ?').run(id);
       return true;
     });
   }
