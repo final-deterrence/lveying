@@ -39,8 +39,11 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   if (!authorized(request)) return NextResponse.json({ error: '未授权' }, { status: 401 });
   try {
-    const { id, count, action, reason } = await request.json();
+    const { id, count, action, reason, number } = await request.json();
     if (typeof id !== 'string') return NextResponse.json({ error: '无效的抽奖结果' }, { status: 400 });
+    if (action === 'withdraw' || action === 'replace') {
+      return NextResponse.json({ result: dataStore.updateGrandTicket(id, number, action, typeof reason === 'string' ? reason : '') });
+    }
     const ok = action === 'invalidate'
       ? dataStore.invalidateLotteryResult(id, typeof reason === 'string' ? reason : '')
       : dataStore.revealLotteryResult(id, count);

@@ -5,7 +5,24 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { LotteryConfig, LotteryResult } from '@/types';
 import * as XLSX from 'xlsx';
-import { awards, awardKeys, STAGE_STATE_KEY, STAGE_VIEW_KEY } from '@/lib/lotteryStage';
+import { awards, awardKeys, formatNumber, STAGE_STATE_KEY, STAGE_VIEW_KEY } from '@/lib/lotteryStage';
+import { isTicketRange, MAX_TICKET_NUMBER } from '@/public/wujiandao/tickets.mjs';
+
+function TicketBound({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return <label className="block text-sm font-medium text-gray-700 drop-shadow-lg">
+    {label}
+    <input type="text" inputMode="numeric" value={draft ?? (Number.isSafeInteger(value) ? formatNumber(value) : '')}
+      onFocus={e => e.currentTarget.select()}
+      onChange={e => {
+        const text = e.currentTarget.value;
+        setDraft(text);
+        onChange(/^\d+$/.test(text) ? Number(text) : NaN);
+      }}
+      onBlur={() => setDraft(null)}
+      className="mt-2 w-full px-4 py-2 backdrop-blur-sm bg-white/50 border border-white/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800 font-mono tabular-nums" />
+  </label>;
+}
 
 export default function LotteryConfigPage() {
   const [config, setConfig] = useState<LotteryConfig>({
@@ -67,6 +84,10 @@ export default function LotteryConfigPage() {
   const updateConfig = async () => {
     const token = localStorage.getItem('adminToken');
     if (!token) return;
+    if (!isTicketRange(config.minNumber, config.maxNumber)) {
+      alert(`票号范围须在 0000 至 ${MAX_TICKET_NUMBER} 之间，最小号码须小于或等于最大号码。`);
+      return;
+    }
 
     try {
       const response = await fetch('/api/lottery/config', {
@@ -128,12 +149,12 @@ export default function LotteryConfigPage() {
           '数目': result.numbers.length,
           '状态': result.invalidatedAt ? '已作废' : '有效',
           '作废原因': result.invalidReason || '',
+          '替补票号': result.replacementNumber == null ? '' : formatNumber(result.replacementNumber),
+          '补抽时间': result.replacedAt == null ? '' : new Date(result.replacedAt).toLocaleString('zh-CN'),
         };
 
-        // 添加中奖序号列，补0至7位
         result.numbers.forEach((number, index) => {
-          const paddedNumber = number.toString().padStart(7, '0');
-          row[`序号${index + 1}`] = paddedNumber;
+          row[`序号${index + 1}`] = formatNumber(number);
         });
 
         return row;
@@ -163,6 +184,8 @@ export default function LotteryConfigPage() {
         { wch: 8 },  // 数目
         { wch: 10 }, // 状态
         { wch: 32 }, // 作废原因
+        { wch: 12 }, // 替补票号
+        { wch: 20 }, // 补抽时间
       ];
       
       // 为中奖序号列添加宽度
@@ -235,32 +258,8 @@ export default function LotteryConfigPage() {
                   抽奖参数
                 </h2>
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2 drop-shadow-lg">
-                      最小号码
-                    </label>
-                    <input
-                      type="number"
-                      value={config.minNumber}
-                      onChange={(e) =>
-                        setConfig({ ...config, minNumber: parseInt(e.target.value) })
-                      }
-                      className="w-full px-4 py-2 backdrop-blur-sm bg-white/50 border border-white/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2 drop-shadow-lg">
-                      最大号码
-                    </label>
-                    <input
-                      type="number"
-                      value={config.maxNumber}
-                      onChange={(e) =>
-                        setConfig({ ...config, maxNumber: parseInt(e.target.value) })
-                      }
-                      className="w-full px-4 py-2 backdrop-blur-sm bg-white/50 border border-white/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800"
-                    />
-                  </div>
+                  <TicketBound label="最小号码" value={config.minNumber} onChange={minNumber => setConfig({ ...config, minNumber })} />
+                  <TicketBound label="最大号码" value={config.maxNumber} onChange={maxNumber => setConfig({ ...config, maxNumber })} />
                   <div className="grid grid-cols-2 gap-3">
                     {awardKeys.map(key => <label key={key} className="text-sm font-medium text-gray-700">
                       {awards[key].title}名额
@@ -317,15 +316,16 @@ export default function LotteryConfigPage() {
                           {result.title}
                         </span>
                         {result.invalidatedAt && <span className="text-red-700 font-bold">已作废：{result.invalidReason}</span>}
+                        {result.replacementNumber != null && <span>替补票号 {formatNumber(result.replacementNumber)}</span>}
 
                       </div>
                       <div className="flex flex-wrap gap-2 mb-2">
                         {result.numbers.map((num, idx) => (
                           <div
                             key={idx}
-                            className="w-12 h-12 flex items-center justify-center backdrop-blur-md bg-white/20 border border-white/30 text-gray-800 text-xl font-bold rounded-lg shadow-lg"
+                             className="min-w-[4.5rem] px-2 h-11 flex items-center justify-center backdrop-blur-md bg-white/20 border border-white/30 text-gray-800 font-mono text-xl font-bold tabular-nums rounded-lg shadow-lg"
                           >
-                            {num}
+                            {formatNumber(num)}
                           </div>
                         ))}
                       </div>

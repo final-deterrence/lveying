@@ -1,4 +1,5 @@
 import type { LotteryConfig, LotteryResult, StageAward } from '../types';
+import { formatTicket } from '../public/wujiandao/tickets.mjs';
 
 export const awards = {
   third: { title: '三等奖', count: 30, scene: 2 },
@@ -31,6 +32,10 @@ export const scenes: Scene[] = [
   { label: '行动结束', film: 'end', award: 'grand' },
 ];
 export const program = [0, 1, 2, 5, 6, 7, 8, 9, 10, 11, 12, 15, 16, 17];
+export const chapterStarts = [0, 5, 8, 11] as const;
+export function chapterStart(scene: number): number {
+  return chapterStarts.reduce<number>((start, next) => next <= scene ? next : start, 0);
+}
 
 export type DrawRequest = { id: string; config: LotteryConfig; award?: StageAward };
 export type Completed = { request: DrawRequest; result: LotteryResult; revealed: number; revealOrder?: number[] };
@@ -44,13 +49,14 @@ export type StageState = {
   result: LotteryResult | null;
   revealed: number;
   revealOrder?: number[];
+  replacementSeat?: number;
   drafts: Record<string, { title: string; count: number }>;
 };
 export const initialStage: StageState = { completed: {}, scene: 0, rolling: false, request: null, result: null, revealed: 0, drafts: {} };
 export const STAGE_STATE_KEY = 'wujian-lottery-stage-v1';
 export const STAGE_VIEW_KEY = 'wujian-lottery-screen-v1';
 export const STAGE_CHANNEL = 'wujian-lottery-screen-v1';
-export const formatNumber = (n: number) => String(n).padStart(7, '0');
+export const formatNumber = formatTicket;
 
 // 只打乱展示位置，不改变服务器中奖记录和公开结果的顺序。
 export function createRevealOrder(count: number): number[] {
@@ -86,6 +92,7 @@ export type StageView = {
   title: string;
   phase: 'standby' | 'rolling' | 'masking' | 'revealing' | 'complete';
   slots: (number | null)[];
+  replacementSlot?: number;
   heroNumbers: number[];
   minNumber: number;
   maxNumber: number;
@@ -101,12 +108,18 @@ export function buildStageView(state: StageState, config: LotteryConfig, masking
     return [key, Math.max(1, Math.min(100, Math.floor(n) || 1))];
   })) as Record<StageAward, number>;
   const draft = state.drafts[String(state.scene)] || (scene.draw && { ...scene.draw, count: counts[scene.award] });
-  const count = scene.draw ? state.result?.numbers.length ?? Math.max(0, Math.min(100, Math.floor(draft?.count || 0))) : 0;
+  const verifyTickets = scene.film === 'done-0';
+  const count = scene.draw || verifyTickets ? state.result?.numbers.length ?? Math.max(0, Math.min(100, Math.floor(draft?.count || 0))) : 0;
   const slots: (number | null)[] = Array(count).fill(null);
   const order = state.revealOrder;
   const validOrder = isRevealOrder(order, count);
-  if (state.result && maskingStartedAt === null && !state.rolling) {
+  const pendingTicket = scene.award === 'grand' && scene.draw ? state.result?.pendingTicket : undefined;
+  const pendingIndex = pendingTicket === undefined ? -1 : state.result!.numbers.indexOf(pendingTicket);
+  const replacementSlot = pendingIndex >= 0 ? (validOrder ? order![pendingIndex] : pendingIndex)
+    : scene.draw && scene.award === 'grand' && !state.rolling ? state.replacementSeat : undefined;
+  if (state.result && maskingStartedAt === null && (!state.rolling || pendingIndex >= 0)) {
     for (let i = 0; i < Math.min(state.revealed, count); i++) {
+      if (i === pendingIndex) continue;
       // 旧批次没有位置表时保持原布局，避免升级后已揭晓号码跳动。
       slots[validOrder ? order![i] : i] = state.result.numbers[i];
     }
@@ -114,13 +127,13 @@ export function buildStageView(state: StageState, config: LotteryConfig, masking
   return {
     film: scene.film, award: scene.award, cueStartedAt: state.cueStartedAt ?? 0,
     counts: { ...counts, ...(count ? { [scene.award]: count } : {}) },
-    excluded: state.rolling && state.result && state.revealed === state.result.numbers.length
+    excluded: state.rolling && pendingIndex < 0 && state.result && state.revealed === state.result.numbers.length
       ? (state.usedNumbers ?? []).filter(n => !state.result!.numbers.includes(n)) : state.usedNumbers ?? [],
-    scene: state.scene, batchId: state.result?.id ?? null, title: draft?.title ?? '', slots,
+    scene: state.scene, batchId: state.result?.id ?? null, title: draft?.title ?? '', slots: scene.draw ? slots : [],
+    ...(maskingStartedAt === null && replacementSlot !== undefined ? { replacementSlot } : {}),
     phase: maskingStartedAt !== null ? 'masking' : state.rolling ? 'rolling'
       : state.result ? (state.revealed >= state.result.numbers.length ? 'complete' : 'revealing') : 'standby',
-    heroNumbers: state.scene === 16 && maskingStartedAt === null && !state.rolling
-      ? state.result?.numbers.slice(0, state.revealed) ?? [] : [],
+    heroNumbers: verifyTickets ? slots.filter((n): n is number => n !== null) : [],
     minNumber: config.minNumber, maxNumber: config.maxNumber, maskingStartedAt,
   };
 }

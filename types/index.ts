@@ -68,4 +68,7 @@ export interface LotteryResult {
   revealedCount?: number;
   invalidatedAt?: number;
   invalidReason?: string;
+  pendingTicket?: number; // Private director state; this seat is awaiting a substitute.
+  replacementNumber?: number;
+  replacedAt?: number;
 }
