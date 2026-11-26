@@ -41,13 +41,7 @@ export default function DisplayPage() {
 
   return (
     <div 
-      className="min-h-screen text-white flex flex-col justify-end p-8"
-      style={{
-        backgroundImage: 'url(/danmakubg.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
+      className="festival-projection-backdrop min-h-screen text-white flex flex-col justify-end p-8"
     >
       <div className="space-y-2">
         {displayDanmakus.map((danmaku, index) => (

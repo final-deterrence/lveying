@@ -193,8 +193,7 @@ export default function LotteryConfigPage() {
   if (loading) {
     return (
       <div 
-        className="min-h-screen flex items-center justify-center bg-cover bg-center bg-no-repeat"
-        style={{ backgroundImage: `url('/guestbg.png')` }}
+        className="festival-backdrop min-h-screen flex items-center justify-center bg-cover bg-center bg-no-repeat"
       >
         <div className="text-gray-800 text-xl drop-shadow-lg">加载中...</div>
       </div>
@@ -203,14 +202,13 @@ export default function LotteryConfigPage() {
 
   return (
     <div 
-      className="min-h-screen p-4 bg-cover bg-center bg-no-repeat"
-      style={{ backgroundImage: `url('/guestbg.png')` }}
+      className="festival-backdrop min-h-screen p-4 bg-cover bg-center bg-no-repeat"
     >
       <div className="max-w-6xl mx-auto">
-        <div className="backdrop-blur-lg bg-white/30 border border-white/20 rounded-2xl shadow-2xl p-6">
-          <div className="flex items-center justify-between mb-6">
+        <div className="backdrop-blur-lg bg-white/30 border border-white/20 rounded-2xl shadow-2xl p-4 sm:p-6">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h1 className="text-2xl font-bold text-gray-800 drop-shadow-lg">抽奖设置</h1>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-2 sm:gap-3">
               <Link
                 href="/admin/lottery/display"
                 className="px-6 py-2 backdrop-blur-md bg-white/20 border border-white/30 text-gray-800 rounded-xl hover:bg-white/30 transition-all"
@@ -336,7 +334,7 @@ export default function LotteryConfigPage() {
 
             {/* 右侧：抽奖历史 */}
             <div className="backdrop-blur-md bg-white/20 border border-white/30 rounded-xl p-6">
-              <div className="flex items-center justify-between mb-4">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-xl font-bold text-gray-800 drop-shadow-lg">抽奖历史</h2>
                 <div className="flex gap-2">
                   <button

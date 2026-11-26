@@ -124,20 +124,14 @@ export default function DanmakuPage() {
 
   return (
     <div 
-      className="min-h-screen"
-      style={{
-        backgroundImage: 'url(/guestbg.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
+      className="festival-backdrop min-h-screen"
     >
       {/* 导航栏 */}
       <GuestNavBar />
 
-      <div className="max-w-4xl mx-auto px-4 pt-20 pb-8 space-y-6">
+      <div className="max-w-2xl mx-auto px-4 pt-20 pb-8 space-y-6">
         {/* 上半部分：最近弹幕展示 */}
-        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-6">
+        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-4 sm:p-6">
           {loading ? (
             <div className="text-center py-8">
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-purple-500 border-t-transparent"></div>
@@ -148,9 +142,8 @@ export default function DanmakuPage() {
               {/* 弹幕滚动容器 - 显示约8条弹幕的高度 */}
               <div 
                 ref={scrollContainerRef}
-                className="flex flex-col space-y-3 overflow-y-scroll custom-scrollbar p-4"
+                className="flex flex-col space-y-3 overflow-y-scroll custom-scrollbar h-[min(480px,46svh)] p-2 sm:p-4"
                 style={{ 
-                  height: '480px', // 约8条弹幕的高度 (每条约60px)
                   scrollBehavior: 'smooth'
                 }}
               >
@@ -188,7 +181,7 @@ export default function DanmakuPage() {
         </div>
 
         {/* 下半部分：发送弹幕 */}
-        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-6">
+        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-4 sm:p-6">
           <form onSubmit={handleSubmit}>
             <div className="flex items-center gap-3">
               <input
@@ -198,13 +191,13 @@ export default function DanmakuPage() {
                 onFocus={() => setPlaceholder(getRandomPlaceholder(placeholder))}
                 placeholder={placeholder}
                 maxLength={20}
-                className="flex-1 px-4 py-3 backdrop-blur-md bg-white/80 border-2 border-white/30 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all text-gray-800"
+                className="min-w-0 flex-1 px-4 py-3 backdrop-blur-md bg-white/80 border-2 border-white/30 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all text-gray-800"
               />
               <button
                 type="submit"
                 disabled={sending || !content.trim() || content.trim().length > 20}
                 aria-label="发送弹幕"
-                className="w-14 h-14 backdrop-blur-md bg-gradient-to-r from-blue-500/80 to-cyan-500/80 rounded-full shadow-lg border border-white/30 hover:from-blue-600/80 hover:to-cyan-600/80 transform hover:scale-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center"
+                className="h-12 w-12 shrink-0 sm:h-14 sm:w-14 backdrop-blur-md bg-gradient-to-r from-blue-500/80 to-cyan-500/80 rounded-full shadow-lg border border-white/30 hover:from-blue-600/80 hover:to-cyan-600/80 transform hover:scale-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center"
               >
                 <Image
                   src="/send.png"

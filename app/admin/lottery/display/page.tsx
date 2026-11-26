@@ -176,7 +176,7 @@ export default function LotteryDisplayPage() {
     const screen = window.open('/admin/lottery/screen', 'wujian-lottery-screen', 'popup,width=1280,height=720');
     if (!screen) setError('大屏窗口未能打开，请允许此网站弹出窗口后重试。');
   };
-  return <>
+  return <div className="director-layout">
     <LotteryStage view={view} />
     {controls && <aside className="controls">
       <div className="control-head"><strong>抽奖导播台</strong><button onClick={() => setControls(false)}>隐藏 H</button></div>
@@ -203,6 +203,12 @@ export default function LotteryDisplayPage() {
     {!controls && <button className="show-controls" onClick={() => setControls(true)}>控制 H</button>}
     <style jsx>{`
       .controls{position:fixed;right:12px;top:12px;z-index:10;background:#101a18ee;color:#edf5f0;border:1px solid #50645d;border-radius:8px;padding:14px;width:min(340px,95vw);max-height:95vh;overflow:auto;font:14px system-ui}.control-head{display:flex;justify-content:space-between;align-items:center;font-size:16px}.controls label{display:block;margin-top:8px}.controls select,.controls input{display:block;width:100%;background:#1c2d27;border:1px solid #52665c;color:white;padding:7px;border-radius:4px}.controls p{line-height:1.5;color:#b5c8bf;font-size:12px;margin:10px 0}.fields{display:grid;grid-template-columns:2fr 1fr;gap:8px}.buttons{display:flex;gap:6px;flex-wrap:wrap}.controls button,.show-controls{background:#25463a;border:1px solid #5d8976;color:#fff;padding:7px 10px;border-radius:4px}.controls button:disabled{opacity:.4}.controls .danger{background:#612b2b}.controls .error{color:#ff9c9c;font-size:14px}.nav{margin-top:12px}.show-controls{position:fixed;right:10px;top:10px;z-index:10;opacity:.5}
+      @media(max-width:640px){
+        .director-layout{min-height:100vh;background:#07100d}
+        .director-layout :global(.lottery-stage){min-height:52svh}
+        .controls{position:relative;inset:auto;width:auto;max-height:none;margin:0 12px 12px;overflow:visible}
+        .controls select,.controls input{font-size:16px}
+      }
     `}</style>
-  </>;
+  </div>;
 }

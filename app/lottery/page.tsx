@@ -25,9 +25,9 @@ export default function LotteryPage() {
   }, []);
 
   const titles = Array.from(new Set(results.map(result => result.title)));
-  return <main className="min-h-screen bg-[#07100d] text-green-100">
+  return <main className="festival-stage-backdrop min-h-screen text-green-100">
     <GuestNavBar />
-    <div className="max-w-5xl mx-auto px-5 pt-24 pb-16">
+    <div className="max-w-2xl mx-auto px-4 pt-20 pb-16 sm:pt-24">
       <p className="text-green-400 tracking-widest text-sm">MISSION / LOTTERY RESULTS</p>
       <h1 className="text-3xl font-bold mt-3 mb-4">抽奖结果</h1>
       <p className="text-green-200/70 mb-8">已揭晓的中奖号码将在此显示，页面每 5 秒自动更新。</p>

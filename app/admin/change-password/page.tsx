@@ -85,13 +85,7 @@ export default function ChangePasswordPage() {
   if (!authenticated) {
     return (
       <div 
-        className="min-h-screen flex items-center justify-center"
-        style={{
-          backgroundImage: 'url(/guestbg.png)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundAttachment: 'fixed'
-        }}
+        className="festival-backdrop min-h-screen flex items-center justify-center"
       >
         <div className="text-gray-800 text-xl font-semibold drop-shadow-lg backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 p-8">
           验证中...
@@ -102,13 +96,7 @@ export default function ChangePasswordPage() {
 
   return (
     <div 
-      className="min-h-screen p-4"
-      style={{
-        backgroundImage: 'url(/guestbg.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
+      className="festival-backdrop min-h-screen p-4"
     >
       <div className="max-w-2xl mx-auto pt-8">
         <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-8">
