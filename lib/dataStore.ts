@@ -1,19 +1,19 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { Program, Danmaku, LotteryConfig, LotteryResult, DanmakuPage, DanmakuFilter, DanmakuReview } from '../types';
+import type { Program, Danmaku, LotteryConfig, LotteryResult, StageAward, DanmakuPage, DanmakuFilter, DanmakuReview } from '../types';
 import { defaultData, type DataStoreState } from './defaultData';
 import { getDatabase, insertProgram, insertDanmaku, normalizeIp, transaction } from './database';
+import { isTicketRange, MAX_TICKET_NUMBER } from '../public/wujiandao/tickets.mjs';
 
 type Row = Record<string, unknown>;
 export class LotteryError extends Error {}
 
 export function validateLotteryConfig(config: LotteryConfig): void {
-  if (!Number.isSafeInteger(config.minNumber) || !Number.isSafeInteger(config.maxNumber)
-    || config.minNumber < 0 || config.maxNumber > 9999999 || config.minNumber > config.maxNumber
+  if (!isTicketRange(config.minNumber, config.maxNumber)
     || !Number.isSafeInteger(config.count) || config.count < 1 || config.count > 100
     || config.count > config.maxNumber - config.minNumber + 1
     || typeof config.title !== 'string' || !config.title.trim() || config.title.length > 100) {
-    throw new LotteryError('请填写有效的奖项名称、号码范围（0 至 9999999）和人数（1 至 100）');
+    throw new LotteryError(`请填写有效的奖项名称、号码范围（0000 至 ${MAX_TICKET_NUMBER}）和人数（1 至 100）`);
   }
 }
 
@@ -49,7 +49,9 @@ const reviewColumns = 'd.*, r.status AS review_status, r.source AS review_source
 const reviewJoin = 'FROM danmakus d LEFT JOIN danmaku_reviews r ON r.danmaku_id = d.id';
 
 function resultFromRow(row: Row): LotteryResult {
-  return { id: String(row.id), title: String(row.title), numbers: JSON.parse(String(row.numbers)), timestamp: Number(row.timestamp) };
+  return { id: String(row.id), title: String(row.title), numbers: JSON.parse(String(row.numbers)), timestamp: Number(row.timestamp),
+    ...(row.pending_ticket == null ? {} : { pendingTicket: Number(row.pending_ticket) }),
+    ...(row.unpublished != null && row.revealed_count != null ? { revealedCount: Number(row.revealed_count) } : {}) };
 }
 
 export class DataStore {
@@ -185,6 +187,11 @@ export class DataStore {
     return transaction(this.db, () => {
       const updated = { ...this.getLotteryConfig(), ...config };
       validateLotteryConfig(updated);
+      if (updated.awardCounts !== undefined && (!updated.awardCounts || typeof updated.awardCounts !== 'object'
+        || Array.isArray(updated.awardCounts) || Object.entries(updated.awardCounts).some(([key, n]) =>
+          !['third', 'second', 'first', 'grand'].includes(key) || !Number.isSafeInteger(n) || n < 1 || n > 100))) {
+        throw new LotteryError('每档奖项的名额须为 1 至 100 的整数');
+      }
       this.db.prepare("UPDATE settings SET value = ? WHERE key = 'lottery_config'").run(JSON.stringify(updated));
       return updated;
     });
@@ -197,52 +204,116 @@ export class DataStore {
     return result;
   }
 
-  drawLottery(id: string, config: LotteryConfig): LotteryResult {
-    validateLotteryConfig(config);
-    const requestConfig = JSON.stringify({ minNumber: config.minNumber, maxNumber: config.maxNumber, count: config.count, title: config.title!.trim() });
+  getStageAwards(): Partial<Record<StageAward, LotteryResult>> {
+    const rows = this.db.prepare(`SELECT a.award, r.*, t.number AS pending_ticket, p.revealed_count, u.result_id AS unpublished
+      FROM lottery_stage_awards a
+      JOIN lottery_results r ON r.id = a.result_id
+      LEFT JOIN lottery_ticket_replacements t ON t.result_id=r.id AND t.substitute IS NULL
+      LEFT JOIN lottery_reveal_progress p ON p.result_id = r.id
+      LEFT JOIN lottery_unpublished u ON u.result_id = r.id`).all();
+    return Object.fromEntries(rows.map(row => [String(row.award), resultFromRow(row)]));
+  }
+
+  drawLottery(id: string, config: LotteryConfig, award?: StageAward, revealCount?: number): LotteryResult {
+    const title = typeof config.title === 'string' ? config.title.trim() : '';
+    const requestConfig = JSON.stringify({ minNumber: config.minNumber, maxNumber: config.maxNumber, count: config.count, title });
     return transaction(this.db, () => {
       const existing = this.db.prepare('SELECT * FROM lottery_results WHERE id = ?').get(id);
       if (existing) {
         const result = resultFromRow(existing);
         const previous = this.db.prepare('SELECT config FROM lottery_draw_requests WHERE result_id = ?').get(id);
         if (!previous || previous.config !== requestConfig) throw new LotteryError('抽奖请求编号冲突');
-        return result;
+        if (award && !this.db.prepare('SELECT 1 FROM lottery_stage_awards WHERE award = ? AND result_id = ?').get(award, id)) {
+          throw new LotteryError('该请求已失效，请刷新导播台');
+        }
+        return award ? this.getStageAwards()[award]! : result;
+      }
+      validateLotteryConfig(config);
+      if (revealCount !== undefined && (!Number.isSafeInteger(revealCount) || revealCount < 1 || revealCount > config.count)) {
+        throw new LotteryError('无效的初始揭晓数量');
+      }
+      // 两个导播窗口同时确认同一档时，后到的请求读取已提交的那一批。
+      if (award) {
+        const recorded = this.getStageAwards()[award];
+        if (recorded) return recorded;
       }
       if (this.db.prepare('SELECT 1 FROM lottery_unpublished LIMIT 1').get()) throw new LotteryError('已有未揭晓的抽奖结果，请先恢复并揭晓');
-      const used = new Set<number>();
-      for (const row of this.db.prepare('SELECT numbers FROM lottery_results').all()) {
-        for (const n of JSON.parse(String(row.numbers))) {
-          if (Number.isSafeInteger(n) && n >= config.minNumber && n <= config.maxNumber) used.add(n);
-        }
-      }
-      const excluded = Array.from(used).sort((a, b) => a - b);
-      const available = config.maxNumber - config.minNumber + 1 - excluded.length;
-      if (available < config.count) throw new LotteryError(`可用号码仅剩 ${available} 个，不足以抽取 ${config.count} 人`);
-      const chosen = new Set<number>();
-      // Floyd 无放回抽样，内存只与中奖人数相关。
-      for (let j = available - config.count; j < available; j++) {
-        const candidate = randomInt(j + 1);
-        chosen.add(chosen.has(candidate) ? j : candidate);
-      }
-      const numbers = Array.from(chosen).map(index => {
-        let low = config.minNumber, high = config.maxNumber;
-        while (low < high) {
-          const mid = Math.floor((low + high) / 2);
-          let l = 0, r = excluded.length;
-          while (l < r) { const m = Math.floor((l + r) / 2); if (excluded[m] <= mid) l = m + 1; else r = m; }
-          if (mid - config.minNumber + 1 - l > index) high = mid; else low = mid + 1;
-        }
-        return low;
-      });
-      // 随机展示顺序，避免抽样算法对位置引入顺序偏差。
-      for (let i = numbers.length - 1; i > 0; i--) { const j = randomInt(i + 1); [numbers[i], numbers[j]] = [numbers[j], numbers[i]]; }
-      const result = { id, title: config.title!.trim(), numbers, timestamp: Date.now() };
+      const numbers = this.sampleTickets(config);
+      const initialRevealed = award ? (revealCount ?? numbers.length) : 0;
+      const result: LotteryResult = { id, title, numbers, timestamp: Date.now(),
+        ...(award && initialRevealed < numbers.length ? { revealedCount: initialRevealed } : {}) };
       this.db.prepare('INSERT INTO lottery_results (id, title, numbers, timestamp) VALUES (?, ?, ?, ?)')
         .run(id, result.title, JSON.stringify(numbers), result.timestamp);
-      this.db.prepare('INSERT INTO lottery_unpublished VALUES (?)').run(id);
-      this.db.prepare('INSERT INTO lottery_reveal_progress VALUES (?, 0)').run(id);
+      if (award) this.db.prepare('INSERT INTO lottery_stage_awards VALUES (?, ?)').run(award, id);
+      if (!award || initialRevealed < numbers.length) this.db.prepare('INSERT INTO lottery_unpublished VALUES (?)').run(id);
+      this.db.prepare('INSERT INTO lottery_reveal_progress VALUES (?, ?)').run(id, initialRevealed);
       this.db.prepare('INSERT INTO lottery_draw_requests VALUES (?, ?)').run(id, requestConfig);
       return result;
+    });
+  }
+
+  private ticketPool({ minNumber, maxNumber }: LotteryConfig) {
+    const used = new Set<number>();
+    for (const row of this.db.prepare('SELECT numbers FROM lottery_results').all()) {
+      for (const n of JSON.parse(String(row.numbers))) {
+        if (Number.isSafeInteger(n) && n >= minNumber && n <= maxNumber) used.add(n);
+      }
+    }
+    for (const row of this.db.prepare('SELECT number FROM lottery_ticket_replacements WHERE number BETWEEN ? AND ?').all(minNumber, maxNumber)) used.add(Number(row.number));
+    return { excluded: Array.from(used).sort((a, b) => a - b), available: maxNumber - minNumber + 1 - used.size };
+  }
+
+  private sampleTickets(config: LotteryConfig): number[] {
+    const { available, excluded } = this.ticketPool(config);
+    if (available < config.count) throw new LotteryError(`可用号码仅剩 ${available} 个，不足以抽取 ${config.count} 人`);
+    const chosen = new Set<number>();
+    // Floyd sampling over free ranks avoids allocating the full ticket pool.
+    for (let j = available - config.count; j < available; j++) {
+      const candidate = randomInt(j + 1);
+      chosen.add(chosen.has(candidate) ? j : candidate);
+    }
+    const numbers = Array.from(chosen).map(index => {
+      let low = config.minNumber, high = config.maxNumber;
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        let l = 0, r = excluded.length;
+        while (l < r) { const m = Math.floor((l + r) / 2); if (excluded[m] <= mid) l = m + 1; else r = m; }
+        if (mid - config.minNumber + 1 - l > index) high = mid; else low = mid + 1;
+      }
+      return low;
+    });
+    for (let i = numbers.length - 1; i > 0; i--) { const j = randomInt(i + 1); [numbers[i], numbers[j]] = [numbers[j], numbers[i]]; }
+    return numbers;
+  }
+
+  updateGrandTicket(id: string, number: number, action: 'withdraw' | 'replace', reason: string): LotteryResult {
+    if (!Number.isSafeInteger(number)) throw new LotteryError('请选择一张有效的中奖票');
+    return transaction(this.db, () => {
+      const grand = this.getStageAwards().grand;
+      if (!grand || grand.id !== id || grand.numbers.length < 2) throw new LotteryError('只能在已揭晓的多人特等奖中逐张核券');
+      const previous = this.db.prepare('SELECT substitute FROM lottery_ticket_replacements WHERE result_id=? AND number=?').get(id, number);
+      // An excluded number can never return, so the batch and original ticket identify the operation across retries.
+      if (previous && (action === 'withdraw' || previous.substitute != null)) return grand;
+      const seat = grand.numbers.indexOf(number);
+      if (seat < 0) throw new LotteryError('所选号码已不是本档有效票号，请刷新导播台');
+      const config = { ...this.getLotteryConfig(), count: 1 };
+      if (!isTicketRange(config.minNumber, config.maxNumber)) throw new LotteryError(`请先在抽奖设置中将票号范围设在 0000 至 ${MAX_TICKET_NUMBER} 之间`);
+      if (action === 'withdraw') {
+        if (!reason.trim() || reason.length > 200) throw new LotteryError('请填写作废原因');
+        if (grand.pendingTicket !== undefined) throw new LotteryError('请先完成当前票号的补抽');
+        if (!this.ticketPool(config).available) throw new LotteryError('已无可抽号码，请先核对号码范围');
+        this.db.prepare('INSERT INTO lottery_ticket_replacements (result_id,number,reason,timestamp) VALUES (?,?,?,?)')
+          .run(id, number, reason.trim(), Date.now());
+        return { ...grand, pendingTicket: number };
+      }
+      if (!previous || grand.pendingTicket !== number) throw new LotteryError('请先确认所选奖券无效');
+      const [substitute] = this.sampleTickets(config);
+      grand.numbers[seat] = substitute;
+      this.db.prepare('UPDATE lottery_results SET numbers=? WHERE id=?').run(JSON.stringify(grand.numbers), id);
+      this.db.prepare('UPDATE lottery_ticket_replacements SET substitute=?, replaced_at=? WHERE result_id=? AND number=?')
+        .run(substitute, Date.now(), id, number);
+      delete grand.pendingTicket;
+      return grand;
     });
   }
 
@@ -271,26 +342,40 @@ export class DataStore {
     return transaction(this.db, () => {
       const row = this.db.prepare('SELECT numbers FROM lottery_results WHERE id = ?').get(id);
       if (!row) return false;
+      if (this.db.prepare("SELECT 1 FROM lottery_stage_awards WHERE result_id = ? AND award <> 'grand'").get(id)) {
+        throw new LotteryError('只有单人特等奖可以现场核券重抽');
+      }
       if ((JSON.parse(String(row.numbers)) as number[]).length !== 1 || this.db.prepare('SELECT 1 FROM lottery_unpublished WHERE result_id = ?').get(id)) throw new LotteryError('只能作废已全部揭晓的单人抽奖结果');
       this.db.prepare('INSERT OR IGNORE INTO lottery_invalid_results VALUES (?, ?, ?)').run(id, reason.trim(), Date.now());
+      this.db.prepare('DELETE FROM lottery_stage_awards WHERE result_id = ?').run(id);
       return true;
     });
   }
 
   getAllLotteryResults(includeInvalid = false): LotteryResult[] {
-    return this.db.prepare(`SELECT r.*, p.revealed_count, i.timestamp AS invalidated_at, i.reason AS invalid_reason,
-      u.result_id AS unpublished FROM lottery_results r
+    const batches = this.db.prepare(`SELECT r.*, p.revealed_count, i.timestamp AS invalidated_at, i.reason AS invalid_reason,
+      t.number AS withdrawn, u.result_id AS unpublished FROM lottery_results r
       LEFT JOIN lottery_unpublished u ON u.result_id = r.id
       LEFT JOIN lottery_reveal_progress p ON p.result_id = r.id
       LEFT JOIN lottery_invalid_results i ON i.result_id = r.id
+      LEFT JOIN lottery_ticket_replacements t ON t.result_id=r.id AND t.substitute IS NULL
       WHERE (? = 1 OR i.result_id IS NULL) ORDER BY r.timestamp DESC, r.seq DESC`).all(Number(includeInvalid)).flatMap(row => {
         const result = resultFromRow(row);
         const revealed = row.unpublished == null ? result.numbers.length : Number(row.revealed_count ?? 0);
         if (!revealed) return [];
         result.numbers = result.numbers.slice(0, revealed);
+        if (row.withdrawn != null) result.numbers = result.numbers.filter(n => n !== Number(row.withdrawn));
         if (row.invalidated_at != null) { result.invalidatedAt = Number(row.invalidated_at); result.invalidReason = String(row.invalid_reason); }
         return [result];
       });
+    if (!includeInvalid) return batches;
+    const withdrawn = this.db.prepare(`SELECT t.*,r.title FROM lottery_ticket_replacements t
+      JOIN lottery_results r ON r.id=t.result_id ORDER BY t.timestamp DESC`).all();
+    for (const row of withdrawn) batches.push({ id: row.result_id + '/ticket/' + row.number, title: String(row.title),
+      numbers: [Number(row.number)], timestamp: Number(row.timestamp), invalidatedAt: Number(row.timestamp), invalidReason: String(row.reason),
+      ...(row.substitute == null ? {} : { replacementNumber: Number(row.substitute) }),
+      ...(row.replaced_at == null ? {} : { replacedAt: Number(row.replaced_at) }) });
+    return batches.sort((a,b) => b.timestamp-a.timestamp);
   }
 
   getLatestLotteryResult(): LotteryResult | null {

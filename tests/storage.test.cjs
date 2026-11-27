@@ -13,7 +13,10 @@ const root = path.resolve(__dirname, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'lveying-sqlite-test-'));
 const compiled = path.join(temp, 'compiled');
 fs.mkdirSync(compiled);
-fs.symlinkSync(path.join(root, 'node_modules'), path.join(compiled, 'node_modules'), 'dir');
+fs.symlinkSync(path.join(root, 'node_modules'), path.join(compiled, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+const ticketModule = 'public/wujiandao/tickets.mjs';
+fs.mkdirSync(path.dirname(path.join(compiled, ticketModule)), { recursive: true });
+fs.copyFileSync(path.join(root, ticketModule), path.join(compiled, ticketModule));
 const files = [
   'lib/defaultData.ts', 'lib/ip.ts', 'lib/database.ts', 'lib/dataStore.ts', 'lib/userManager.ts', 'lib/auth.ts',
   'lib/danmakuPolicy.ts', 'lib/danmakuGuard.ts', 'lib/lotteryStage.ts', 'app/api/admin/banned-ips/route.ts',
@@ -40,7 +43,7 @@ const { defaultData } = require(path.join(compiled, 'lib/defaultData.js'));
 const { submitDanmaku, getDanmakuClientIp, getDanmakuClientId, DANMAKU_CLIENT_COOKIE } = require(path.join(compiled, 'lib/danmakuGuard.js'));
 const { getDanmakuSettings, saveDanmakuSettings, reviewDanmaku, getDanmakuGuardStats, validateDanmakuSettings } = require(path.join(compiled, 'lib/danmakuPolicy.js'));
 const { canonicalIp } = require(path.join(compiled, 'lib/ip.js'));
-const { buildStageView, createRevealOrder, restoreRevealOrder, initialStage } = require(path.join(compiled, 'lib/lotteryStage.js'));
+const { buildStageView, createRevealOrder, restoreRevealOrder, initialStage, formatNumber } = require(path.join(compiled, 'lib/lotteryStage.js'));
 
 function fixture(legacy) {
   const directory = fs.mkdtempSync(path.join(temp, 'data-'));
@@ -479,6 +482,39 @@ test('已迁移的 SQLite 自动补充审核和限流表，不重新导入 JSON 
   assert.equal(store.getDanmakus().stats.approved, 2);
 });
 
+test('四位票号统一补零，新开奖限于四位，旧记录及其重试保留原号', () => {
+  assert.deepEqual([0, 9, 719, 9999, 10719].map(formatNumber), ['0000', '0009', '0719', '9999', '10719']);
+  fixture();
+  const store = new DataStore();
+  const config = { minNumber: 9999, maxNumber: 9999, count: 1, title: '测试奖' };
+  const oldConfig = { ...config, maxNumber: 19999 };
+  assert.throws(() => store.updateLotteryConfig(oldConfig), /9999/);
+  assert.throws(() => store.drawLottery('outside', oldConfig), /9999/);
+  assert.deepEqual(store.drawLottery('ceiling', config, 'first').numbers, [9999]);
+  const db = getDatabase();
+  db.prepare('UPDATE lottery_draw_requests SET config = ? WHERE result_id = ?').run(JSON.stringify(oldConfig), 'ceiling');
+  db.prepare('UPDATE lottery_results SET numbers = ? WHERE id = ?').run('[10719]', 'ceiling');
+  assert.deepEqual(store.drawLottery('ceiling', oldConfig, 'first').numbers, [10719]);
+  assert.deepEqual(store.getLatestLotteryResult().numbers.map(formatNumber), ['10719']);
+
+  const grandConfig = { minNumber: 0, maxNumber: 2, count: 2, title: '特等奖' };
+  store.updateLotteryConfig(grandConfig);
+  const grand = store.drawLottery('grand', grandConfig, 'grand');
+  const original = grand.numbers[0];
+  const setLegacyRange = () => db.prepare("UPDATE settings SET value = ? WHERE key = 'lottery_config'")
+    .run(JSON.stringify({ ...grandConfig, maxNumber: 19999 }));
+  setLegacyRange();
+  assert.throws(() => store.updateGrandTicket(grand.id, original, 'withdraw', '无有效票'), /9999/);
+  assert.equal(store.getStageAwards().grand.pendingTicket, undefined);
+  store.updateLotteryConfig(grandConfig);
+  store.updateGrandTicket(grand.id, original, 'withdraw', '无有效票');
+  setLegacyRange();
+  assert.throws(() => store.updateGrandTicket(grand.id, original, 'replace', ''), /9999/);
+  assert.equal(store.getStageAwards().grand.pendingTicket, original);
+  store.updateLotteryConfig(grandConfig);
+  assert.equal(store.updateGrandTicket(grand.id, original, 'replace', '').numbers[0], 3 - grand.numbers[0] - grand.numbers[1]);
+});
+
 test('服务端抽奖排除历史号码、跨批次去重、请求幂等，并且揭晓前不公开', () => {
   const legacy = structuredClone(defaultData);
   legacy.lotteryResults = [{ id: 'legacy', title: '旧奖', numbers: [2, 4], timestamp: 10 }];
@@ -562,6 +598,66 @@ test('逐个揭晓进度持久化、单调递增，作废记录保留且不再�
   assert.equal(new Set([...batch.numbers, ...single.numbers, ...retry.numbers]).size, 4);
 });
 
+test('四档现场开奖一次提交即公开，两个导播台和刷新均读取同一批结果', () => {
+  fixture();
+  const store = new DataStore();
+  const config = { minNumber: 0, maxNumber: 43, count: 30, title: '三等奖' };
+  store.updateLotteryConfig({ awardCounts: { third: 30, second: 10, first: 3, grand: 1 } });
+  assert.equal(new DataStore().getLotteryConfig().awardCounts.third, 30);
+  assert.throws(() => store.updateLotteryConfig({ awardCounts: { grand: 0 } }), /名额/);
+  const first = store.drawLottery('third-director', config, 'third');
+  assert.deepEqual(new DataStore().getLatestLotteryResult().numbers, first.numbers);
+  assert.deepEqual(store.drawLottery('third-retry', { ...config, count: 1 }, 'third'), first);
+  const all = [...first.numbers];
+  for (const [key, title, count] of [['second', '二等奖', 10], ['first', '一等奖', 3], ['grand', '特等奖', 1]]) {
+    all.push(...store.drawLottery(key, { ...config, title, count }, key).numbers);
+  }
+  assert.equal(store.getAllLotteryResults().length, 4);
+  assert.equal(new Set(all).size, 44);
+  assert.deepEqual(new DataStore().getStageAwards().third, first);
+  assert.equal(store.getUnpublishedLotteryResult(), null);
+  store.invalidateLotteryResult('grand', '核券无效');
+  assert.equal(store.getStageAwards().grand, undefined);
+  assert.throws(() => store.drawLottery('grand', { ...config, title: '特等奖', count: 1 }, 'grand'), /失效/);
+  assert.throws(() => store.drawLottery('new-grand', { ...config, title: '特等奖', count: 1 }, 'grand'), /不足/);
+  store.clearAllLotteryResults();
+  assert.deepEqual(store.getStageAwards(), {});
+});
+
+test('多人核券作废一张，公开名单与投影保留其他席位，重试和刷新不会再次补抽', () => {
+  fixture();
+  const store = new DataStore();
+  const config = store.updateLotteryConfig({ minNumber: 0, maxNumber: 3, count: 3, title: '现场特等奖' });
+  const original = store.drawLottery('grand-many', config, 'grand');
+  const [one, invalid, three] = original.numbers;
+  assert.throws(() => store.updateGrandTicket(original.id, invalid, 'replace', ''), /先确认/);
+  const pending = store.updateGrandTicket(original.id, invalid, 'withdraw', '现场无有效票');
+  assert.deepEqual(new DataStore().getStageAwards().grand, pending);
+  assert.deepEqual(store.updateGrandTicket(original.id, invalid, 'withdraw', '重复请求'), pending);
+  assert.throws(() => store.updateGrandTicket(original.id, three, 'withdraw', '另一席'), /先完成/);
+  assert.deepEqual(store.getAllLotteryResults()[0].numbers, [one, three]);
+  assert.equal(store.getAllLotteryResults()[0].pendingTicket, undefined);
+  const state = { ...initialStage, scene: 15, result: pending, revealed: 3,
+    rolling: true, revealOrder: [2,0,1], usedNumbers: original.numbers };
+  const view = buildStageView(state, config, null);
+  assert.deepEqual(view.slots, [null,three,one]);
+  assert.equal(view.replacementSlot, 0);
+  assert.deepEqual(view.excluded, original.numbers);
+  const result = new DataStore().updateGrandTicket(original.id, invalid, 'replace', '');
+  assert.deepEqual(store.updateGrandTicket(original.id, invalid, 'replace', ''), result);
+  assert.deepEqual(store.updateGrandTicket(original.id, invalid, 'withdraw', '迟到的请求'), result);
+  assert.deepEqual(result.numbers, [one,6-one-invalid-three,three]);
+  assert.deepEqual(store.getStageAwards().grand, result);
+  assert.deepEqual(store.getAllLotteryResults()[0].numbers, result.numbers);
+  const audit = store.getAllLotteryResults(true).find(r => r.invalidatedAt);
+  assert.deepEqual(audit.numbers, [invalid]); assert.equal(audit.invalidReason, '现场无有效票');
+  assert.equal(audit.replacementNumber, result.numbers[1]); assert(audit.replacedAt >= audit.invalidatedAt);
+  assert.throws(() => store.updateGrandTicket(original.id, three, 'withdraw', '再次核验'), /已无可抽/);
+  assert.throws(() => store.drawLottery('extra', { ...config,count:1 }, 'first'), /不足/);
+  store.clearAllLotteryResults();
+  assert.equal(store.drawLottery('fresh',{...config,count:4},'grand').numbers.length,4);
+});
+
 test('随机揭晓位置不重复，部分揭晓、刷新和全部揭晓均保持已有位置', () => {
   const random = Math.random;
   let order;
@@ -632,6 +728,19 @@ test('旧批次升级只打乱未揭晓位置，恢复新批次时不会重新�
   assert.deepEqual(restoreRevealOrder(5, 5), [0, 1, 2, 3, 4]);
 });
 
+test('特等奖从揭晓转入核券时保留同一组位置，重播或遮挡时不提前亮号', () => {
+  const config = { minNumber: 0, maxNumber: 999, count: 3, title: '特等奖' };
+  const result = { id: 'verification', title: config.title, numbers: [0, 74, 508], timestamp: 1 };
+  const state = { ...initialStage, scene: 15, result, revealed: 3, revealOrder: [2, 0, 1] };
+  const slots = buildStageView(state, config, null).slots;
+  const verification = { ...state, scene: 16 };
+  assert.deepEqual(slots, [74, 508, 0]);
+  assert.deepEqual(buildStageView(verification, config, null).heroNumbers, slots);
+  assert.deepEqual(buildStageView({ ...verification, revealed: 2 }, config, null).heroNumbers, [74, 0]);
+  assert.deepEqual(buildStageView({ ...verification, rolling: true }, config, null).heroNumbers, []);
+  assert.deepEqual(buildStageView(verification, config, 100).heroNumbers, []);
+});
+
 test('随机揭晓每一步只公开对应号码，服务端恢复进度后大屏仍保留同一布局', () => {
   const directory = fixture();
   const store = new DataStore();
@@ -657,6 +766,40 @@ test('随机揭晓每一步只公开对应号码，服务端恢复进度后大�
     }
   }
   assert.equal(store.getUnpublishedLotteryResult(), null);
+});
+
+test('一等奖逐席开奖每步只公开已揭晓席位，刷新和重试保留进度且投影不泄漏未揭晓号码', () => {
+  const directory = fixture();
+  const store = new DataStore();
+  const config = { minNumber: 1, maxNumber: 20, count: 3, title: '一等奖' };
+  const drawn = store.drawLottery('first-step', config, 'first', 1);
+  assert.equal(drawn.numbers.length, 3);
+  assert.equal(drawn.revealedCount, 1);
+  assert.deepEqual(store.drawLottery('first-step', config, 'first', 1), drawn);
+  assert.deepEqual(store.getAllLotteryResults()[0].numbers, drawn.numbers.slice(0, 1));
+  assert.equal(store.getStageAwards().first.revealedCount, 1);
+
+  const rollingSecond = buildStageView({
+    ...initialStage, scene: 10, rolling: true, result: drawn, revealed: 1,
+    revealOrder: [0, 1, 2], usedNumbers: drawn.numbers,
+  }, config, null);
+  assert.deepEqual(rollingSecond.slots, [drawn.numbers[0], null, null]);
+  assert.equal(rollingSecond.activeSlot, 1);
+  assert.equal(rollingSecond.phase, 'rolling');
+  assert.equal(rollingSecond.excluded.includes(drawn.numbers[1]), false);
+  assert.equal(rollingSecond.excluded.includes(drawn.numbers[2]), false);
+
+  store.revealLotteryResult('first-step', 2);
+  getDatabase().close();
+  globalThis.lveyingDatabases.delete(path.join(directory, 'lveying.sqlite'));
+  const reopened = new DataStore();
+  assert.equal(reopened.getStageAwards().first.revealedCount, 2);
+  assert.deepEqual(reopened.getAllLotteryResults()[0].numbers, drawn.numbers.slice(0, 2));
+
+  reopened.revealLotteryResult('first-step', 3);
+  assert.equal(reopened.getStageAwards().first.revealedCount, undefined);
+  assert.deepEqual(reopened.getAllLotteryResults()[0].numbers, drawn.numbers);
+  assert.equal(reopened.getUnpublishedLotteryResult(), null);
 });
 
 test('管理员可在已有数据库发布和删除首页宣传链接，阻止无权限修改和覆盖其他管理员的更新', async () => {

@@ -88,6 +88,10 @@ function initialize(db: DatabaseSync, dataDir: string): void {
         result_id TEXT PRIMARY KEY REFERENCES lottery_results(id) ON DELETE CASCADE,
         config TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS lottery_stage_awards (
+        award TEXT PRIMARY KEY,
+        result_id TEXT NOT NULL UNIQUE REFERENCES lottery_results(id) ON DELETE CASCADE
+      );
       CREATE TABLE IF NOT EXISTS lottery_reveal_progress (
         result_id TEXT PRIMARY KEY REFERENCES lottery_results(id) ON DELETE CASCADE,
         revealed_count INTEGER NOT NULL DEFAULT 0
@@ -96,6 +100,13 @@ function initialize(db: DatabaseSync, dataDir: string): void {
         result_id TEXT PRIMARY KEY REFERENCES lottery_results(id) ON DELETE CASCADE,
         reason TEXT NOT NULL, timestamp INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS lottery_ticket_replacements (
+        result_id TEXT NOT NULL REFERENCES lottery_results(id) ON DELETE CASCADE,
+        number INTEGER NOT NULL, substitute INTEGER, reason TEXT NOT NULL, timestamp INTEGER NOT NULL, replaced_at INTEGER,
+        PRIMARY KEY (result_id, number)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS lottery_one_pending_ticket
+        ON lottery_ticket_replacements(result_id) WHERE substitute IS NULL;
       CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY, passwordHash TEXT NOT NULL, role TEXT NOT NULL,
         createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
@@ -111,6 +122,9 @@ function initialize(db: DatabaseSync, dataDir: string): void {
         UPDATE metadata SET value = CAST(value AS INTEGER) + 1 WHERE key = 'danmaku_revision';
       END;
     `);
+    if (!db.prepare('PRAGMA table_info(lottery_ticket_replacements)').all().some(col => col.name === 'replaced_at')) {
+      db.exec('ALTER TABLE lottery_ticket_replacements ADD COLUMN replaced_at INTEGER');
+    }
     if (db.prepare("SELECT 1 FROM metadata WHERE key = 'initialized_v1'").get()) return;
 
     // 一次性导入；失败时回滚，不覆盖原 JSON，也不把损坏文件替换成默认数据。

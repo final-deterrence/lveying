@@ -44,11 +44,14 @@ export interface DanmakuSettings {
   };
 }
 
+export type StageAward = 'third' | 'second' | 'first' | 'grand';
+
 export interface LotteryConfig {
   minNumber: number;
   maxNumber: number;
   count: number;
   title?: string; // 奖项名称，如"一等奖"、"二等奖"
+  awardCounts?: Partial<Record<StageAward, number>>;
 }
 
 export interface DanmakuPage {
@@ -65,4 +68,7 @@ export interface LotteryResult {
   revealedCount?: number;
   invalidatedAt?: number;
   invalidReason?: string;
+  pendingTicket?: number; // Private director state; this seat is awaiting a substitute.
+  replacementNumber?: number;
+  replacedAt?: number;
 }

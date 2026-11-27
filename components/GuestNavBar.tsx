@@ -4,7 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, usePathname } from 'next/navigation';
 
-export default function GuestNavBar() {
+export default function GuestNavBar({ dark = false }: { dark?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
 
@@ -19,9 +19,11 @@ export default function GuestNavBar() {
     { icon: '/chat.png', label: '弹幕', href: '/danmaku' },
     { icon: '/badge.png', label: '演职人员', href: '/credits' },
   ];
+  const chrome = dark ? 'border-[#52615f] bg-[#1a262b]/95' : 'border-white/50 bg-[#fff2e8]/80';
+  const icon = `h-7 w-7 max-w-full object-contain sm:h-8 sm:w-8${dark ? ' invert opacity-90' : ''}`;
 
   return (
-    <nav aria-label="观众导航" className="fixed inset-x-0 top-0 z-50 border-b border-white/50 bg-[#fff2e8]/80 shadow-lg backdrop-blur-lg">
+    <nav aria-label="观众导航" className={`fixed inset-x-0 top-0 z-50 border-b shadow-lg backdrop-blur-lg ${chrome}`}>
       <div className="mx-auto grid max-w-2xl grid-cols-[minmax(0,1fr)_minmax(0,5fr)_minmax(0,1fr)] items-center justify-items-center px-2 py-3 sm:px-4">
         {/* 返回按钮 */}
         <button
@@ -29,7 +31,7 @@ export default function GuestNavBar() {
           className="flex h-11 w-full max-w-12 items-center justify-center transition-transform hover:scale-110 sm:h-12"
           title="返回"
         >
-          <Image src="/return.png" alt="返回" width={32} height={32} className="h-7 w-7 max-w-full object-contain drop-shadow-lg sm:h-8 sm:w-8" />
+          <Image src="/return.png" alt="返回" width={32} height={32} className={`${icon} drop-shadow-lg`} />
         </button>
 
         {/* 导航按钮 */}
@@ -40,13 +42,13 @@ export default function GuestNavBar() {
               href={item.href}
               className={`flex h-11 w-full max-w-12 items-center justify-center transition-transform sm:h-12 ${
                 pathname === item.href
-                  ? 'scale-125 drop-shadow-2xl'
+                  ? (dark ? 'rounded-md bg-[#38494c]' : 'scale-125 drop-shadow-2xl')
                   : 'hover:scale-110 drop-shadow-lg'
               }`}
               title={item.label}
               aria-current={pathname === item.href ? 'page' : undefined}
             >
-              <Image src={item.icon} alt={item.label} width={32} height={32} className="h-7 w-7 max-w-full object-contain sm:h-8 sm:w-8" />
+              <Image src={item.icon} alt={item.label} width={32} height={32} className={icon} />
             </Link>
           ))}
         </div>
@@ -57,7 +59,7 @@ export default function GuestNavBar() {
           className="flex h-11 w-full max-w-12 items-center justify-center transition-transform hover:scale-110 sm:h-12"
           title="刷新"
         >
-          <Image src="/refresh.png" alt="刷新" width={32} height={32} className="h-7 w-7 max-w-full object-contain drop-shadow-lg sm:h-8 sm:w-8" />
+          <Image src="/refresh.png" alt="刷新" width={32} height={32} className={`${icon} drop-shadow-lg`} />
         </button>
       </div>
     </nav>
