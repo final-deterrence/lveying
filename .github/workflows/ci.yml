@@ -15,7 +15,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -23,6 +23,8 @@ jobs:
 
       - name: Build
         run: npm run build
+      - name: Test SQLite storage
+        run: npm test
   send_email:
     needs: build
     runs-on: ubuntu-latest
@@ -50,7 +52,7 @@ jobs:
           username: ${{ secrets.MAIL_USER }}
           password: ${{ secrets.MAIL_PASS }}
           subject: >
-            掠影网站自动部署报告 - ${{ job.status }} -${{github.ref_name}} - ${{ steps.last_commit.outputs.message }}
+            无间道网站自动部署报告 - ${{ job.status }} -${{github.ref_name}} - ${{ steps.last_commit.outputs.message }}
 
           to: |
             "jiangwt23@mails.tsinghua.edu.cn"
@@ -62,7 +64,7 @@ jobs:
           from: "CI Bot <bot@mail.lveying.live>"
           body: |
             你好，管理员：
-            掠影网站在分支 ${{ github.ref_name }} 上的自动部署已完成，状态为 ${{ job.status }}。以下为具体信息。
+            无间道网站在分支 ${{ github.ref_name }} 上的自动部署已完成，状态为 ${{ job.status }}。以下为具体信息。
 
             仓库:   ${{ github.repository }}
             分支:   ${{ github.ref_name }}

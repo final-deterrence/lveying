@@ -9,7 +9,7 @@ export const revalidate = 0;
 export async function GET() {
   try {
     const danmakus = dataStore.getCensoredDanmakus();
-    return NextResponse.json({ danmakus });
+    return NextResponse.json({ danmakus }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     return NextResponse.json(
       { error: '获取弹幕失败' },

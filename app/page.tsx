@@ -1,187 +1,71 @@
-'use client';
-
-import GuestNavBar from '@/components/GuestNavBar';
 import Image from 'next/image';
-import { useState } from 'react';
+import GuestNavBar from '@/components/GuestNavBar';
+import FestivalEasterEgg from '@/components/FestivalEasterEgg';
+import { getBilibiliVideo, getHomepageLinks } from '@/lib/homepageLinks';
 
-interface FlyingS {
-  id: number;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  rotation: number;
-  size: number;
-}
+export const dynamic = 'force-dynamic';
 
 export default function Home() {
-  const [exploded, setExploded] = useState(false);
-  const [flyingS, setFlyingS] = useState<FlyingS[]>([]);
-
-  const handleServerClick = () => {
-    if (exploded) return;
-    
-    setExploded(true);
-    
-    // 生成50个飞散的"S"
-    const newFlyingS: FlyingS[] = [];
-    for (let i = 0; i < 100; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 10 + Math.random() * 20;
-      newFlyingS.push({
-        id: i,
-        x: 30, // server图标中心位置
-        y: window.innerHeight - 30,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - 5, // 向上偏移
-        rotation: Math.random() * 360,
-        size: 20 + Math.random() * 40,
-      });
-    }
-    setFlyingS(newFlyingS);
-
-    // 动画
-    let frame = 0;
-    const animate = () => {
-      frame++;
-      if (frame > 300) { // 5秒后停止
-        setExploded(false);
-        setFlyingS([]);
-        return;
-      }
-
-      setFlyingS(prev => prev.map(s => ({
-        ...s,
-        x: s.x + s.vx,
-        y: s.y + s.vy,
-        vy: s.vy + 0.3, // 重力
-        rotation: s.rotation + 5,
-      })));
-
-      requestAnimationFrame(animate);
-    };
-    requestAnimationFrame(animate);
-  };
+  const { videoUrl, articles } = getHomepageLinks();
+  const video = getBilibiliVideo(videoUrl);
 
   return (
-    <div 
-      className="min-h-screen"
-      style={{
-        backgroundImage: 'url(/guestbg.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-      }}
-    >
-      {/* 导航栏 */}
+    <div className="festival-backdrop min-h-screen text-gray-800">
       <GuestNavBar />
+      <main className="mx-auto max-w-2xl px-4 pb-8 pt-20 sm:pt-24">
+        <article className="space-y-5 rounded-2xl border border-white/50 bg-white/35 p-4 shadow-2xl backdrop-blur-lg sm:space-y-6 sm:p-6">
+          <Image src="/theme/poster.webp" alt="无间道学生节主海报" width={1440} height={2160}
+            priority unoptimized className="mx-auto h-auto w-full max-w-sm rounded-xl shadow-lg" />
 
-      <div className="max-w-2xl mx-auto px-4 pt-20 pb-8">
-        {/* 透明毛玻璃框 */}
-        <div className="relative backdrop-blur-lg bg-white/30 rounded-2xl shadow-2xl overflow-visible border border-white/20 p-6">
-          {/* 海报图片 */}
-          <div className="relative w-full mb-6" style={{ aspectRatio: '3/4' }}>
-            <Image 
-              src="/poster.png" 
-              alt="活动海报" 
-              fill
-              className="object-contain rounded-xl"
-              priority
-            />
-          </div>
+          <header className="text-center">
+            <h1>
+              <Image src="/theme/wordmark.webp" alt="无间道" width={1024} height={238}
+                unoptimized className="mx-auto h-auto w-full max-w-[16rem] rounded-lg" />
+            </h1>
+            <p className="mt-3 text-lg text-gray-700">清华大学电子系学生节</p>
+          </header>
 
-          {/* 文字和链接内容 */}
-          <div className="space-y-4">
-            <div className="text-center">
-              <h2 className="text-3xl font-bold text-gray-800 mb-2">掠影</h2>
-              <p className="text-lg text-gray-600">电子系第27届学生节</p>
-            </div>
-
-            <div className="border-t border-black/30 pt-4">
-              <p className="text-gray-700 text-left">
-                欢迎参加本次学生节！请使用上方导航栏查看节目进度、抽奖结果和发送弹幕互动。
-                
-              </p><br />
-              <p className="text-gray-700 text-left">
-                电子系学生节始创于1999年，是一场集舞台剧、DV 作品、歌曲、舞蹈、器乐、相声等于一体的综合性原创晚会。电子系学生节的筹备贯穿整个秋季学期，为电子系的同学们提供了广阔的展示平台。二十七年来，电子系学生节以其丰富的原创内容、独特的精神关怀以及轻松娱乐的氛围在电子系乃至于清华大学的同学们之中得到了广泛的关注。
-              </p>
-
-              <br/>
-              <p className="text-gray-700 text-left">
-                “掠影”，寓意是“电子系同学的生活掠影”，代表着电子系学子日常里那些鲜活又珍贵的切片。而学生节，正是这些“生活掠影”的集中定格与温暖回响。这场以“掠影”为名的学生节，既是对过往时光的回望与致敬，也是对电子系独有的青春图景的生动呈现——那些零散却闪光的瞬间，终将串联成最珍贵的青春记忆，成为未来回望时最温暖的注脚。
-              </p>
-              <br/>
-
-<div className="flex justify-center w-full">
-  <div className="w-full max-w-3xl aspect-video">
-    <iframe
-      src="//player.bilibili.com/player.html?isOutside=true&aid=115664727578611&bvid=BV1Sm25BzESZ&cid=34502086518&p=1"
-      className="w-full h-full rounded-xl shadow-lg"
-      scrolling="no"
-      frameBorder="0"
-      allowFullScreen
-    ></iframe>
-  </div>
-</div>
-
-<div className="border-t border-black/30 pt-4"></div>
-  <p className="text-gray-700 text-left text-bold">
-    <a href="https://mp.weixin.qq.com/s/F_FFAVio_1wCcsqHtuzvAg" className="font-bold underline" style={{ color: 'rgb(96, 71, 25)' }}>掠影 | 不要掠过那个瞬间</a><br/>
-      <a href="https://mp.weixin.qq.com/s/TpUp6TUaaXE1UOsH5knKgg" className="font-bold underline "style={{ color: 'rgb(96, 71, 25)' }}>掠影 | 主海报发布</a><br/>
-      <a href="https://mp.weixin.qq.com/s/WKw7fFFJr_-eKgKdXBaYMQ" className="font-bold underline "style={{ color: 'rgb(96, 71, 25)' }}>掠影 | 路演来啦！</a><br/>
-      <a href="https://mp.weixin.qq.com/s/pCf5nociJ0_ERusoWVIcIQ" className="font-bold underline "style={{ color: 'rgb(96, 71, 25)' }}>掠影 | 主题宣传视频《寻影》发布</a><br/>
-      <a href="https://mp.weixin.qq.com/s/FBUXMEZTxtj974Y5HNFvWw" className="font-bold underline" style={{ color: 'rgb(96, 71, 25)' }}>掠影 | 线上抽奖来啦！</a><br/>
-      <a href="https://mp.weixin.qq.com/s/KusZuCXHg179O-8myGgm8g" className="font-bold underline" style={{ color: 'rgb(96, 71, 25)' }}>掠影 | 主持人介绍 & 活动网站发布</a><br/>
-      <a href="https://mp.weixin.qq.com/s/Wiicqt3KgnppM6Vt6BatPg" className="font-bold underline" style={{ color: 'rgb(96, 71, 25)' }}>掠影 | 节目预热 & 节目单</a><br/>
-    </p>
-</div>
-          </div>
-        </div>
-        
-        {/* server.png 图标 - 站在页面底部 */}
-        <div 
-          className="fixed bottom-0 left-6 z-50 cursor-pointer transition-transform hover:scale-110"
-          onClick={handleServerClick}
-          style={{
-            opacity: exploded ? 0 : 1,
-            transition: exploded ? 'opacity 0.3s' : 'none',
-          }}
-        >
-          <Image 
-            src="/server.png" 
-            alt="Server" 
-            width={3}
-            height={3}
-            className="object-contain"
-          />
-        </div>
-
-        {/* 爆炸的"S"字母 */}
-        {flyingS.map(s => (
-          <div
-            key={s.id}
-            className="fixed text-white font-bold pointer-events-none z-50"
-            style={{
-              left: `${s.x}px`,
-              top: `${s.y}px`,
-              fontSize: `${s.size}px`,
-              transform: `rotate(${s.rotation}deg)`,
-              textShadow: '0 0 20px rgba(255, 255, 255, 0.8), 0 0 40px rgba(255, 255, 255, 0.5)',
-            }}
-          >
-            S
-          </div>
-        ))}
-        
-        {/* 制作信息 */}
-        <div className="text-center mt-4 pb-4">
-          <p className="text-sm text-gray-800 drop-shadow-md">
-            © 2025 <a href="https://www.weitao-jiang.cn" target="_blank" rel="noopener noreferrer" className="hover:underline">江玮陶</a>
-            {' | '}
-            <a href="https://github.com/CBDT-JWT/lveying" target="_blank" rel="noopener noreferrer" className="hover:underline">Github</a>
+          <p className="border-t border-black/20 pt-4 leading-7 text-gray-700">
+            一起欣赏同学们的原创节目，参与现场弹幕互动，揭晓今晚的幸运号码。
           </p>
-        </div>
-      </div>
+
+          {video && (
+            <section className="border-t border-black/20 pt-4" aria-labelledby="festival-trailer">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 id="festival-trailer" className="text-lg font-bold">学生节宣传片</h2>
+                <a href={video.url} target="_blank" rel="noopener noreferrer" className="text-[#743a43] underline">前往 B 站观看 ↗</a>
+              </div>
+              {video.playerUrl && (
+                <iframe title="学生节宣传片" src={video.playerUrl} loading="lazy" allowFullScreen
+                  className="mt-3 aspect-video w-full rounded-xl border-0 bg-black shadow-md" />
+              )}
+            </section>
+          )}
+
+          {articles.length > 0 && (
+            <section className="border-t border-black/20 pt-4" aria-labelledby="festival-news">
+              <h2 id="festival-news" className="text-lg font-bold">学生节推送</h2>
+              <ul className="mt-1 divide-y divide-black/10">
+                {articles.map(({ title, url }, index) => (
+                  <li key={index}>
+                    <a href={url} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center justify-between gap-3 py-2.5 font-medium text-[#743a43] hover:underline">
+                      <span className="min-w-0 break-words">{title}</span><span aria-hidden="true">↗</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </article>
+
+        <footer className="mt-4 text-center text-sm text-gray-800 drop-shadow-md">
+          © 2025 <a href="https://www.weitao-jiang.cn" target="_blank" rel="noopener noreferrer" className="hover:underline">江玮陶</a>
+          {' | '}
+          <a href="https://github.com/CBDT-JWT/lveying" target="_blank" rel="noopener noreferrer" className="hover:underline">GitHub</a>
+        </footer>
+      </main>
+      <FestivalEasterEgg />
     </div>
   );
 }

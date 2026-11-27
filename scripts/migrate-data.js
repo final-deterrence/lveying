@@ -4,9 +4,14 @@
 const fs = require('fs');
 const path = require('path');
 
-const dataDir = path.join(process.cwd(), 'data');
+const dataDir = path.resolve(process.env.LVEYING_DATA_DIR || path.join(process.cwd(), 'data'));
 const dataFile = path.join(dataDir, 'store.json');
 const backupFile = path.join(dataDir, 'store_backup_before_migration.json');
+
+if (fs.existsSync(path.join(dataDir, 'lveying.sqlite'))) {
+  console.error('已使用 SQLite，请通过后台编辑节目。本脚本仅用于迁移 SQLite 之前的旧 JSON 格式。');
+  process.exit(1);
+}
 
 console.log('🔄 开始数据迁移...\n');
 

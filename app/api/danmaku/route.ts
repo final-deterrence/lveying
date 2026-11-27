@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { verifyToken, getTokenFromRequest } from '@/lib/auth';
 import { dataStore } from '@/lib/dataStore';
+import type { DanmakuFilter } from '@/types';
+import {
+  DANMAKU_CLIENT_COOKIE, DanmakuBodyError, getDanmakuClientId,
+  getDanmakuClientIp, readDanmakuContent, submitDanmaku,
+} from '@/lib/danmakuGuard';
 
 // 禁用缓存，确保每次都获取最新数据
 export const dynamic = 'force-dynamic';
@@ -26,8 +31,19 @@ export async function GET(request: Request) {
       );
     }
 
-    const danmakus = dataStore.getDanmakus();
-    return NextResponse.json({ danmakus });
+    const params = new URL(request.url).searchParams;
+    const page = Number(params.get('page') ?? 1);
+    const pageSize = Number(params.get('pageSize') ?? 50);
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+      return NextResponse.json({ error: '无效的分页参数，pageSize 必须在 1 到 100 之间' }, { status: 400 });
+    }
+    const filter = params.get('status') ?? (params.get('pending') === 'true' ? 'pending' : 'all');
+    if (!['all', 'pending', 'approved', 'rejected'].includes(filter)) {
+      return NextResponse.json({ error: '无效的审核状态' }, { status: 400 });
+    }
+    return NextResponse.json(dataStore.getDanmakus(page, pageSize, filter as DanmakuFilter), {
+      headers: { 'Cache-Control': 'no-store' },
+    });
   } catch (error) {
     return NextResponse.json(
       { error: '获取弹幕失败' },
@@ -38,65 +54,29 @@ export async function GET(request: Request) {
 
 // POST - 发送弹幕（guest端）
 export async function POST(request: Request) {
+  const clientId = getDanmakuClientId(request);
+  const respond = (body: object, status = 200) => {
+    const response = NextResponse.json(body, {
+      status,
+      headers: { 'Cache-Control': 'no-store' },
+    });
+    response.cookies.set(DANMAKU_CLIENT_COOKIE, clientId, {
+      httpOnly: true, sameSite: 'lax', secure: new URL(request.url).protocol === 'https:',
+      path: '/', maxAge: 60 * 60 * 24 * 7,
+    });
+    return response;
+  };
   try {
-    const { content } = await request.json();
-
-    if (!content || content.trim().length === 0) {
-      return NextResponse.json(
-        { error: '弹幕内容不能为空' },
-        { status: 400 }
-      );
-    }
-
-    if (content.trim().length > 40) {
-      return NextResponse.json(
-        { error: '弹幕不能超过40字' },
-        { status: 400 }
-      );
-    }
-
-  // 收集客户端 IP（仅用于审核与日志，不应暴露给公众）。
-  // 如果部署在代理/负载均衡器后面，记得配置 X-Forwarded-For / X-Real-IP
-  // 以便正确获取客户端 IP。
-  // 注意：IP 地址应遵守隐私规范，仅供内部使用。
-    // 尝试获取客户端 IP（优先使用 x-forwarded-for 或 x-real-ip）。
-    // 一些代理或 Node 的 socket 可能返回 IPv6-mapped IPv4 ("::ffff:1.2.3.4")，
-    // 所以在保存前进行规范化（尽量返回纯 IPv4）
-    const ipHeader = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '';
-    const rawIp = ipHeader ? ipHeader.split(',')[0].trim() : '';
-
-    const normalizeIp = (ipStr: string) => {
-      if (!ipStr) return '';
-      // Remove square brackets from IPv6 literal [::1]
-      let ip = ipStr.replace(/^\[|\]$/g, '');
-      // Remove scope id if present (e.g. fe80::1%en0)
-      ip = ip.split('%')[0];
-      // If IPv6 mapped IPv4, extract IPv4
-      const match = ip.match(/(?:.*::ffff:)?(\d+\.\d+\.\d+\.\d+)$/i);
-      if (match) {
-        return match[1];
-      }
-      return ip;
-    };
-
-    const ip = normalizeIp(rawIp);
-
-    // 记录日志用于排查
-    console.log('👋 新弹幕请求:', { rawIp, ip, content: content.trim() });
-
-    // 如果 IP 已被封禁，则直接拒绝请求
-    if (ip && dataStore.isIpBanned(ip)) {
-      console.warn('⛔ 拒绝已封禁 IP 的请求', ip);
-      return NextResponse.json({ error: '此IP已被封禁' }, { status: 403 });
-    }
-
-    const danmaku = dataStore.addDanmaku(content.trim(), ip);
-    return NextResponse.json({ success: true, danmaku });
+    const ip = getDanmakuClientIp(request);
+    if (!ip) return respond({ error: '暂时无法发送弹幕，请稍后重试' }, 503);
+    const content = await readDanmakuContent(request);
+    // 有效提交统一确认处理；是否入队、通过或拦截只在后台显示。
+    submitDanmaku(content, ip, clientId);
+    return respond({ success: true });
   } catch (error) {
-    return NextResponse.json(
-      { error: '发送弹幕失败' },
-      { status: 500 }
-    );
+    if (error instanceof DanmakuBodyError) return respond({ error: error.message }, error.status);
+    console.error('发送弹幕失败:', error);
+    return respond({ error: '发送弹幕失败，请重试' }, 500);
   }
 }
 
@@ -149,16 +129,17 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const { id, censor } = await request.json();
+    const { id, censor, reviewStatus } = await request.json();
+    const status = reviewStatus ?? (typeof censor === 'boolean' ? (censor ? 'approved' : 'pending') : null);
 
-    if (!id || typeof censor !== 'boolean') {
+    if (typeof id !== 'string' || !id || !['approved', 'pending', 'rejected'].includes(status)) {
       return NextResponse.json(
         { error: '参数错误' },
         { status: 400 }
       );
     }
 
-    const success = dataStore.updateDanmakuCensor(id, censor);
+    const success = dataStore.updateDanmakuReview(id, status);
     
     if (success) {
       return NextResponse.json({ success: true });

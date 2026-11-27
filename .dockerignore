@@ -1,0 +1,14 @@
+node_modules
+.next
+.next-dev
+data
+.git
+.github
+.env*
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+coverage
+tsconfig.tsbuildinfo
+*.pdf

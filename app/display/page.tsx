@@ -3,18 +3,33 @@
 import { useEffect, useState, useRef } from 'react';
 import { Danmaku } from '@/types';
 
-const MAX_LINES = 20; // 最多显示15行
+const MAX_LINES = 20;
 
 export default function DisplayPage() {
-  const [danmakus, setDanmakus] = useState<Danmaku[]>([]);
   const [displayDanmakus, setDisplayDanmakus] = useState<Danmaku[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetchDanmakus();
-    // 每2秒检查新弹幕
-    const interval = setInterval(fetchDanmakus, 2000);
-    return () => clearInterval(interval);
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    const poll = async () => {
+      try {
+        const response = await fetch('/api/danmaku/censored', { signal: controller.signal, cache: 'no-store' });
+        if (!response.ok) throw new Error('获取弹幕失败');
+        const data = await response.json();
+        if (!disposed && Array.isArray(data.danmakus)) {
+          const latest: Danmaku[] = data.danmakus.slice(-MAX_LINES);
+          // 同步整份小快照，同时处理新审核、撤回、封禁和清空。
+          setDisplayDanmakus(prev => JSON.stringify(prev) === JSON.stringify(latest) ? prev : latest);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) console.error('获取弹幕失败:', error);
+      }
+      if (!disposed) timer = setTimeout(poll, 2000);
+    };
+    poll();
+    return () => { disposed = true; clearTimeout(timer); controller.abort(); };
   }, []);
 
   // 当弹幕更新时，滚动到底部
@@ -24,43 +39,9 @@ export default function DisplayPage() {
     }
   }, [displayDanmakus]);
 
-  const fetchDanmakus = async () => {
-    try {
-      const response = await fetch('/api/danmaku/censored');
-      const data = await response.json();
-      
-      if (data.danmakus && Array.isArray(data.danmakus)) {
-        // 检查是否有新弹幕
-        const newDanmakus = data.danmakus;
-        setDanmakus(newDanmakus);
-        
-        // 更新显示的弹幕（保持最新的15条）
-        setDisplayDanmakus((prev) => {
-          const allIds = prev.map((d) => d.id);
-          const hasNewDanmaku = newDanmakus.some((d: Danmaku) => !allIds.includes(d.id));
-          
-          if (hasNewDanmaku || prev.length === 0) {
-            // 取最新的15条
-            const latest = newDanmakus.slice(-MAX_LINES);
-            return latest;
-          }
-          return prev;
-        });
-      }
-    } catch (error) {
-      console.error('获取弹幕失败:', error);
-    }
-  };
-
   return (
     <div 
-      className="min-h-screen text-white flex flex-col justify-end p-8"
-      style={{
-        backgroundImage: 'url(/danmakubg.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
+      className="festival-projection-backdrop min-h-screen text-white flex flex-col justify-end p-8"
     >
       <div className="space-y-2">
         {displayDanmakus.map((danmaku, index) => (

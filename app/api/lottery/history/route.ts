@@ -16,9 +16,9 @@ function verifyAdmin(request: Request) {
 }
 
 // GET - 获取所有抽奖历史（公开访问，游客也可以查看）
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const results = dataStore.getAllLotteryResults();
+    const results = dataStore.getAllLotteryResults(Boolean(verifyAdmin(request)));
     return NextResponse.json({ history: results });
   } catch (error) {
     return NextResponse.json(

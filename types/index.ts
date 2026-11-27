@@ -18,6 +18,30 @@ export interface Danmaku {
   censor: boolean; // 审核状态，true 表示已审核通过
   censoredAt?: number; // 审核通过的时间戳
   ip?: string; // 记录发送者的IP地址，用于审核和日志（不应公开展示）
+  review?: DanmakuReview; // 仅管理端返回
+}
+
+export type DanmakuReviewStatus = 'pending' | 'approved' | 'rejected';
+export type DanmakuFilter = 'all' | DanmakuReviewStatus;
+export interface DanmakuReview {
+  status: DanmakuReviewStatus;
+  source: 'auto' | 'manual';
+  reason: string;
+}
+
+export interface DanmakuSettings {
+  rateLimit: {
+    enabled: boolean;
+    intervalSeconds: number;
+    clientPerMinute: number;
+    ipPerMinute: number;
+    rejectDuplicates: boolean;
+  };
+  moderation: {
+    enabled: boolean;
+    allowPhrases: string[];
+    blockTerms: string[];
+  };
 }
 
 export interface LotteryConfig {
@@ -27,9 +51,18 @@ export interface LotteryConfig {
   title?: string; // 奖项名称，如"一等奖"、"二等奖"
 }
 
+export interface DanmakuPage {
+  danmakus: Danmaku[];
+  stats: { total: number; approved: number; pending: number; rejected: number };
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
 export interface LotteryResult {
   id: string;
   title: string; // 奖项名称，如"一等奖"、"二等奖"
   numbers: number[];
   timestamp: number;
+  revealedCount?: number;
+  invalidatedAt?: number;
+  invalidReason?: string;
 }

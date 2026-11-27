@@ -34,10 +34,8 @@ export default function ProgramsPage() {
 
 
 
-  // 找到正在表演的节目（未完成节目中 id 最小的）
-  const currentProgramId = programs
-    .filter((p) => !p.completed)
-    .sort((a, b) => parseInt(a.id) - parseInt(b.id))[0]?.id;
+  // API 已按节目顺序排列；ID 只作标识，不参与排序。
+  const currentProgramId = programs.find(p => !p.completed)?.id;
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedId(prev => prev === id ? null : id);
@@ -87,19 +85,13 @@ export default function ProgramsPage() {
 
   return (
     <div 
-      className="min-h-screen"
-      style={{
-        backgroundImage: 'url(/guestbg.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
+      className="festival-backdrop min-h-screen"
     >
       {/* 导航栏 */}
       <GuestNavBar />
 
       <div className="max-w-2xl mx-auto px-4 pt-20">
-        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-6">
+        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-4 sm:p-6">
           <h1 className="text-2xl font-bold text-gray-800 drop-shadow-lg mb-6 text-center">节目列表</h1>
 
           {loading ? (

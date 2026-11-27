@@ -40,13 +40,7 @@ export default function AdminLoginPage() {
 
   return (
     <div 
-      className="min-h-screen flex items-center justify-center p-4"
-      style={{
-        backgroundImage: 'url(/guestbg.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
+      className="festival-backdrop min-h-screen flex items-center justify-center p-4"
     >
       <div className="max-w-md w-full backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-8">
         <div className="text-center mb-8">

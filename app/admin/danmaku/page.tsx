@@ -1,19 +1,24 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
-import { Danmaku } from '@/types';
+import { Danmaku, DanmakuPage, DanmakuFilter, DanmakuReviewStatus } from '@/types';
 
 export default function AdminDanmakuPage() {
   const [danmakus, setDanmakus] = useState<Danmaku[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [showOnlyPending, setShowOnlyPending] = useState(false);
+  const [filter, setFilter] = useState<DanmakuFilter>('pending');
   const [exporting, setExporting] = useState(false);
   const [bannedIps, setBannedIps] = useState<string[]>([]);
   const [showBannedList, setShowBannedList] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0, totalPages: 1 });
+  const [stats, setStats] = useState({ total: 0, approved: 0, pending: 0, rejected: 0 });
+  const [error, setError] = useState('');
+  const requestRef = useRef<AbortController | null>(null);
   const router = useRouter();
 
   const normalizeIpLocal = (ipStr?: string) => {
@@ -25,37 +30,46 @@ export default function AdminDanmakuPage() {
     return ip;
   };
 
-  useEffect(() => {
+  const fetchDanmakus = useCallback(async () => {
     const token = localStorage.getItem('adminToken');
-    if (!token) {
-      router.push('/admin');
-      return;
-    }
-  fetchDanmakus();
-  fetchBannedIps();
-    // 每3秒自动刷新
-    const interval = setInterval(fetchDanmakus, 3000);
-    return () => clearInterval(interval);
-  }, [router]);
-
-  const fetchDanmakus = async () => {
-    const token = localStorage.getItem('adminToken');
-    if (!token) return;
-
+    if (!token) { router.push('/admin'); return; }
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     try {
-      const response = await fetch('/api/danmaku', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const response = await fetch(`/api/danmaku?page=${page}&pageSize=50&status=${filter}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+        cache: 'no-store',
       });
-      const data = await response.json();
+      if (response.status === 401) { router.push('/admin'); return; }
+      if (!response.ok) throw new Error('获取弹幕失败');
+      const data: DanmakuPage = await response.json();
+      if (controller.signal.aborted) return;
       setDanmakus(data.danmakus);
+      setPagination(data.pagination);
+      setStats(data.stats);
+      setPage(data.pagination.page);
+      setError('');
     } catch (error) {
-      console.error('获取弹幕失败:', error);
+      if (!controller.signal.aborted) setError('获取弹幕失败，稍后自动重试');
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
-  };
+  }, [page, filter, router]);
+
+  useEffect(() => {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      if (!document.hidden) await fetchDanmakus();
+      if (!disposed) timer = setTimeout(poll, 3000);
+    };
+    poll();
+    return () => { disposed = true; clearTimeout(timer); requestRef.current?.abort(); };
+  }, [fetchDanmakus]);
+
+  useEffect(() => { fetchBannedIps(); }, []);
 
   const deleteDanmaku = async (id: string) => {
     if (!confirm('确定要删除这条弹幕吗？')) return;
@@ -75,7 +89,7 @@ export default function AdminDanmakuPage() {
       });
 
       if (response.ok) {
-        setDanmakus(danmakus.filter(d => d.id !== id));
+        await fetchDanmakus();
       } else {
         console.error('删除失败');
       }
@@ -87,9 +101,7 @@ export default function AdminDanmakuPage() {
   };
 
   // 筛选弹幕
-  const filteredDanmakus = showOnlyPending 
-    ? danmakus.filter(d => !d.censor)
-    : danmakus;
+  const filteredDanmakus = danmakus;
 
   const clearAllDanmakus = async () => {
     if (!confirm('确定要清空所有弹幕吗？')) return;
@@ -98,13 +110,16 @@ export default function AdminDanmakuPage() {
     if (!token) return;
 
     try {
-      await fetch('/api/danmaku', {
+      const response = await fetch('/api/danmaku', {
         method: 'DELETE',
         headers: {
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify({}),
       });
-      setDanmakus([]);
+      if (!response.ok) throw new Error('清空弹幕失败');
+      await fetchDanmakus();
     } catch (error) {
       console.error('清空弹幕失败:', error);
     }
@@ -187,17 +202,36 @@ export default function AdminDanmakuPage() {
     }
   };
 
-  const exportDanmakus = useCallback(() => {
-    if (filteredDanmakus.length === 0) return;
+  const exportDanmakus = async () => {
+    const token = localStorage.getItem('adminToken');
+    if (!token) return;
     try {
       setExporting(true);
+      const entries: Danmaku[] = [];
+      let cursor = 0;
+      let snapshot: number | undefined;
+      let hasMore = true;
+      while (hasMore) {
+        const params = new URLSearchParams({ after: String(cursor), status: filter });
+        if (snapshot !== undefined) params.set('snapshot', String(snapshot));
+        const response = await fetch(`/api/danmaku/export?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!response.ok) throw new Error('导出弹幕失败');
+        const batch: { danmakus: Danmaku[]; nextCursor: number; snapshot: number; hasMore: boolean } = await response.json();
+        entries.push(...batch.danmakus);
+        cursor = batch.nextCursor;
+        snapshot = batch.snapshot;
+        hasMore = batch.hasMore;
+      }
+      entries.sort((a, b) => b.timestamp - a.timestamp);
       // 构建表头
-      const rows: (string | number)[][] = [["时间", "IP", "是否审核", "内容"]];
-  filteredDanmakus.forEach(d => {
+      const rows: (string | number)[][] = [["时间", "IP", "审核状态", "审核来源", "审核原因", "内容"]];
+      entries.forEach(d => {
         rows.push([
           new Date(d.timestamp).toLocaleString('zh-CN'),
           d.ip || '',
-          d.censor ? '已审核' : '未审核',
+          d.censor ? '已通过' : d.review?.status === 'rejected' ? '已拦截' : '待审核',
+          d.review?.source === 'auto' ? '自动' : d.review?.source === 'manual' ? '人工' : '历史数据',
+          d.review?.reason || '',
           d.content || '',
         ]);
       });
@@ -215,12 +249,13 @@ export default function AdminDanmakuPage() {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error('导出失败:', err);
+      alert('导出失败，请重试');
     } finally {
       setExporting(false);
     }
-  }, [filteredDanmakus]);
+  };
 
-  const toggleCensor = async (id: string, currentCensor: boolean) => {
+  const setReview = async (id: string, status: DanmakuReviewStatus) => {
     const token = localStorage.getItem('adminToken');
     if (!token) return;
 
@@ -231,31 +266,23 @@ export default function AdminDanmakuPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ id, censor: !currentCensor }),
+        body: JSON.stringify({ id, reviewStatus: status }),
       });
 
       if (response.ok) {
-        setDanmakus(
-          danmakus.map((d) =>
-            d.id === id ? { ...d, censor: !currentCensor } : d
-          )
-        );
+        await fetchDanmakus();
+      } else {
+        setError('更新审核状态失败，请重试');
       }
     } catch (error) {
-      console.error('更新审核状态失败:', error);
+      setError('更新审核状态失败，请重试');
     }
   };
 
   if (loading) {
     return (
       <div 
-        className="min-h-screen flex items-center justify-center"
-        style={{
-          backgroundImage: 'url(/guestbg.png)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundAttachment: 'fixed'
-        }}
+        className="festival-backdrop min-h-screen flex items-center justify-center"
       >
         <div className="text-gray-800 text-xl font-semibold drop-shadow-lg backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 p-8">
           加载中...
@@ -266,46 +293,29 @@ export default function AdminDanmakuPage() {
 
   return (
     <div 
-      className="min-h-screen p-4"
-      style={{
-        backgroundImage: 'url(/guestbg.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
+      className="festival-backdrop min-h-screen p-4"
     >
       <div className="max-w-4xl mx-auto">
-        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-6">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
+        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-4 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+            <div className="flex flex-wrap items-center gap-4">
               <h1 className="text-2xl font-bold text-gray-800 drop-shadow-lg">弹幕管理</h1>
               
-              {/* 筛选开关 */}
-              <div className="flex items-center gap-2">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showOnlyPending}
-                    onChange={(e) => setShowOnlyPending(e.target.checked)}
-                    className="sr-only"
-                  />
-                  <div className={`relative w-12 h-6 rounded-full transition-all backdrop-blur-md border ${
-                    showOnlyPending 
-                      ? 'bg-purple-500/60 border-purple-400/50' 
-                      : 'bg-white/20 border-white/30'
-                  }`}>
-                    <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-all shadow-lg ${
-                      showOnlyPending ? 'translate-x-6' : 'translate-x-0'
-                    }`}></div>
-                  </div>
-                  <span className="ml-2 text-sm font-medium text-gray-800 drop-shadow-lg">
-                    仅显示待审核
-                  </span>
-                </label>
-              </div>
+              <label className="text-sm text-gray-800">审核状态
+                <select value={filter} onChange={e => { setPage(1); setFilter(e.target.value as DanmakuFilter); }}
+                  className="ml-2 p-2 rounded-lg bg-white/70">
+                  <option value="pending">待审核</option>
+                  <option value="approved">已通过</option>
+                  <option value="rejected">已拦截</option>
+                  <option value="all">全部弹幕</option>
+                </select>
+              </label>
             </div>
             
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
+              <Link href="/admin/danmaku/settings" className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700">
+                限流与自动审核
+              </Link>
               <button
                 onClick={exportDanmakus}
                 disabled={exporting || filteredDanmakus.length === 0}
@@ -393,37 +403,49 @@ export default function AdminDanmakuPage() {
           )}
 
           {/* 统计信息 */}
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <div className="bg-blue-50 p-4 rounded-xl">
               <div className="text-sm text-blue-600 mb-1">
-                {showOnlyPending ? '显示中' : '弹幕总数'}
+                弹幕总数
               </div>
               <div className="text-3xl font-bold text-blue-700">
-                {filteredDanmakus.length}
+                {stats.total}
               </div>
             </div>
             <div className="bg-green-50 p-4 rounded-xl">
-              <div className="text-sm text-green-600 mb-1">已审核</div>
+              <div className="text-sm text-green-600 mb-1">已通过</div>
               <div className="text-3xl font-bold text-green-700">
-                {danmakus.filter((d) => d.censor).length}
+                {stats.approved}
               </div>
             </div>
             <div className="bg-purple-50 p-4 rounded-xl">
               <div className="text-sm text-purple-600 mb-1">待审核</div>
               <div className="text-3xl font-bold text-purple-700">
-                {danmakus.filter((d) => !d.censor).length}
+                {stats.pending}
               </div>
+            </div>
+            <div className="bg-red-50 p-4 rounded-xl">
+              <div className="text-sm text-red-600 mb-1">已拦截</div>
+              <div className="text-3xl font-bold text-red-700">{stats.rejected}</div>
             </div>
           </div>
 
+          {error && <p className="text-red-700 mb-3" role="alert">{error}</p>}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-gray-800">
+            <button onClick={() => setPage(p => p - 1)} disabled={page <= 1}
+              className="px-4 py-2 rounded-lg bg-white/40 disabled:opacity-40">上一页</button>
+            <span>第 {pagination.page} / {pagination.totalPages} 页，共 {pagination.total} 条</span>
+            <button onClick={() => setPage(p => p + 1)} disabled={page >= pagination.totalPages}
+              className="px-4 py-2 rounded-lg bg-white/40 disabled:opacity-40">下一页</button>
+          </div>
           {/* 弹幕列表 */}
           {filteredDanmakus.length === 0 ? (
             <div className="text-center py-12">
               <div className="text-6xl mb-4 text-gray-500">
-                {showOnlyPending ? '🎯' : '📝'}
+                {filter === 'pending' ? '🎯' : '📝'}
               </div>
               <p className="text-gray-600 text-lg">
-                {showOnlyPending ? '暂无待审核弹幕' : '暂无弹幕'}
+                当前筛选下暂无弹幕
               </p>
             </div>
           ) : (
@@ -447,7 +469,7 @@ export default function AdminDanmakuPage() {
                               : 'bg-purple-400/20 border-purple-300/30 text-purple-700'
                           }`}
                         >
-                          {danmaku.censor ? '已审核' : '待审核'}
+                          {danmaku.censor ? '已通过' : danmaku.review?.status === 'rejected' ? '已拦截' : '待审核'}
                         </span>
                       </div>
                       <p className="text-gray-800 text-lg mb-2 drop-shadow-lg break-all whitespace-normal">
@@ -459,18 +481,29 @@ export default function AdminDanmakuPage() {
                       {danmaku.ip && (
                         <p className="text-xs text-gray-500 mt-1">IP: {danmaku.ip}</p>
                       )}
+                      {danmaku.review && (
+                        <p className="text-xs text-gray-600 mt-1 break-words">
+                          {danmaku.review.source === 'auto' ? '自动审核' : '人工审核'} · {danmaku.review.reason}
+                        </p>
+                      )}
                     </div>
                     <div className="ml-4 flex flex-col gap-2">
                       <button
-                        onClick={() => toggleCensor(danmaku.id, danmaku.censor)}
+                        onClick={() => setReview(danmaku.id, danmaku.censor ? 'pending' : 'approved')}
                         className={`px-4 py-2 rounded-lg font-medium transition-all backdrop-blur-md border text-white ${
                           danmaku.censor
                             ? 'bg-gray-500/60 border-gray-400/50 hover:bg-gray-500/80'
                             : 'bg-green-500/60 border-green-400/50 hover:bg-green-500/80'
                         }`}
                       >
-                        {danmaku.censor ? '取消审核' : '审核通过'}
+                        {danmaku.censor ? '撤回待审' : '审核通过'}
                       </button>
+                      {!danmaku.censor && (
+                        <button onClick={() => setReview(danmaku.id, danmaku.review?.status === 'rejected' ? 'pending' : 'rejected')}
+                          className="px-4 py-2 rounded-lg bg-orange-600 text-white">
+                          {danmaku.review?.status === 'rejected' ? '转回待审' : '拦截'}
+                        </button>
+                      )}
                       <button
                         onClick={() => deleteDanmaku(danmaku.id)}
                         disabled={deleting === danmaku.id}
