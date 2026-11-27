@@ -28,7 +28,7 @@ export default function LotteryStage({ view, director = false, filmRef, onCue }:
     window.addEventListener('lottery-toggle-audio', toggle);
     return () => window.removeEventListener('lottery-toggle-audio', toggle);
   }, [director, player]);
-  return <main style={{ position: 'fixed', inset: 0, background: '#080e10' }}>
+  return <main className="lottery-stage" style={{ position: 'fixed', inset: 0, background: '#080e10' }}>
     {view ? <iframe title="无间道抽奖大屏" src="/wujiandao/film.html" tabIndex={-1}
       onLoad={e => setPlayer((e.currentTarget.contentWindow as FilmWindow | null)?.wujianFilm ?? null)}
       style={{ width: '100%', height: '100%', display: 'block', border: 0, pointerEvents: 'none' }} />

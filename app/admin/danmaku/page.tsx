@@ -282,13 +282,7 @@ export default function AdminDanmakuPage() {
   if (loading) {
     return (
       <div 
-        className="min-h-screen flex items-center justify-center"
-        style={{
-          backgroundImage: 'url(/guestbg.png)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundAttachment: 'fixed'
-        }}
+        className="festival-backdrop min-h-screen flex items-center justify-center"
       >
         <div className="text-gray-800 text-xl font-semibold drop-shadow-lg backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 p-8">
           加载中...
@@ -299,16 +293,10 @@ export default function AdminDanmakuPage() {
 
   return (
     <div 
-      className="min-h-screen p-4"
-      style={{
-        backgroundImage: 'url(/guestbg.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
+      className="festival-backdrop min-h-screen p-4"
     >
       <div className="max-w-4xl mx-auto">
-        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-6">
+        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-4 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
             <div className="flex flex-wrap items-center gap-4">
               <h1 className="text-2xl font-bold text-gray-800 drop-shadow-lg">弹幕管理</h1>
@@ -443,7 +431,7 @@ export default function AdminDanmakuPage() {
           </div>
 
           {error && <p className="text-red-700 mb-3" role="alert">{error}</p>}
-          <div className="flex items-center justify-between mb-4 text-gray-800">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-gray-800">
             <button onClick={() => setPage(p => p - 1)} disabled={page <= 1}
               className="px-4 py-2 rounded-lg bg-white/40 disabled:opacity-40">上一页</button>
             <span>第 {pagination.page} / {pagination.totalPages} 页，共 {pagination.total} 条</span>

@@ -24,6 +24,7 @@ const files = [
   'app/api/lottery/draw/route.ts', 'app/api/lottery/history/route.ts', 'app/api/lottery/result/route.ts',
   'app/api/danmaku/route.ts', 'app/api/danmaku/public/route.ts', 'app/api/danmaku/censored/route.ts',
   'app/api/danmaku/export/route.ts',
+  'lib/homepageLinks.ts', 'app/api/admin/homepage/route.ts',
 ];
 for (const file of files) {
   const source = fs.readFileSync(path.join(root, file), 'utf8')
@@ -799,4 +800,44 @@ test('一等奖逐席开奖每步只公开已揭晓席位，刷新和重试保�
   assert.equal(reopened.getStageAwards().first.revealedCount, undefined);
   assert.deepEqual(reopened.getAllLotteryResults()[0].numbers, drawn.numbers);
   assert.equal(reopened.getUnpublishedLotteryResult(), null);
+});
+
+test('管理员可在已有数据库发布和删除首页宣传链接，阻止无权限修改和覆盖其他管理员的更新', async () => {
+  fixture(structuredClone(defaultData));
+  const store = new DataStore();
+  assert.equal(store.getPrograms().length, 5);
+  const { GET, PUT } = require(path.join(compiled, 'app/api/admin/homepage/route.js'));
+  const { getHomepageLinks, getBilibiliVideo } = require(path.join(compiled, 'lib/homepageLinks.js'));
+  const { generateToken } = require(path.join(compiled, 'lib/auth.js'));
+  const endpoint = 'http://localhost/api/admin/homepage';
+  const headers = { Authorization: 'Bearer ' + generateToken({ username: 'admin', role: 'admin' }), 'Content-Type': 'application/json' };
+  const update = (body, requestHeaders = headers) => PUT(new Request(endpoint, {
+    method: 'PUT', headers: requestHeaders, body: JSON.stringify(body),
+  }));
+  assert.equal((await GET(new Request(endpoint))).status, 401);
+  const initial = (await (await GET(new Request(endpoint, { headers }))).json()).settings;
+  assert.equal(initial.revision, 0);
+  assert.equal(initial.articles[0].url, 'https://mp.weixin.qq.com/s/XWFjhVA0owJOyT6FdT_W_Q');
+
+  const draft = {
+    ...initial,
+    videoUrl: 'https://www.bilibili.com/video/BV1abcdefghJ/?p=2&share_source=copy',
+    articles: [...initial.articles, { title: ' 新推送 ', url: 'https://mp.weixin.qq.com/s/sample-article' }],
+  };
+  assert.equal((await update(draft, {})).status, 401);
+  assert.equal((await update({ ...draft, videoUrl: 'https://www.bilibili.com.example.org/video/BV1abcdefghJ/' })).status, 400);
+  assert.equal((await update({ ...draft, articles: [{ title: '不支持的链接', url: 'https://mp.weixin.qq.com@example.org/s/test' }] })).status, 400);
+  assert.deepEqual(getHomepageLinks(), initial);
+
+  const published = (await (await update(draft)).json()).settings;
+  assert.equal(published.revision, 1);
+  assert.equal(published.articles[1].title, '新推送');
+  assert.equal(published.videoUrl, 'https://www.bilibili.com/video/BV1abcdefghJ/?p=2');
+  assert.equal(new URL(getBilibiliVideo(published.videoUrl).playerUrl).searchParams.get('page'), '2');
+  assert.deepEqual(getBilibiliVideo('https://b23.tv/AbC123'), { url: 'https://b23.tv/AbC123' });
+  assert.equal((await update(draft)).status, 409);
+  assert.deepEqual(getHomepageLinks(), published);
+  assert.equal((await update({ revision: 1, videoUrl: '', articles: [] })).status, 200);
+  assert.deepEqual(getHomepageLinks(), { revision: 2, videoUrl: '', articles: [] });
+  assert.equal(store.getPrograms().length, 5);
 });

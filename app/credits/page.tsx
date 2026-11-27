@@ -27,19 +27,13 @@ export default function CreditsPage() {
 
   return (
     <div 
-      className="min-h-screen"
-      style={{
-        backgroundImage: 'url(/guestbg.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
+      className="festival-backdrop min-h-screen"
     >
       {/* 导航栏 */}
       <GuestNavBar />
 
-      <div className="max-w-5xl mx-auto px-4 pt-20">
-        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-8">
+      <div className="max-w-2xl mx-auto px-4 pt-20">
+        <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-4 sm:p-8">
           <h1 className="text-3xl font-bold text-gray-800 drop-shadow-lg mb-6 text-center">
             工作人员表
           </h1>

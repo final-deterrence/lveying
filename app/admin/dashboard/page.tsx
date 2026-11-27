@@ -25,13 +25,7 @@ export default function AdminDashboard() {
   if (!authenticated) {
     return (
       <div 
-        className="min-h-screen flex items-center justify-center"
-        style={{
-          backgroundImage: 'url(/guestbg.png)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundAttachment: 'fixed'
-        }}
+        className="festival-backdrop min-h-screen flex items-center justify-center"
       >
         <div className="text-gray-800 text-xl font-semibold drop-shadow-lg backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 p-8">
           验证中...
@@ -42,13 +36,7 @@ export default function AdminDashboard() {
 
   return (
     <div 
-      className="min-h-screen p-4"
-      style={{
-        backgroundImage: 'url(/guestbg.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
+      className="festival-backdrop min-h-screen p-4"
     >
       <div className="max-w-6xl mx-auto">
         <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-6 mb-6">
@@ -66,6 +54,11 @@ export default function AdminDashboard() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Link href="/admin/homepage"
+            className="backdrop-blur-md bg-white/20 border border-white/30 rounded-2xl shadow-lg hover:shadow-2xl hover:bg-white/30 transform hover:scale-105 transition-all p-8 text-gray-800">
+            <h2 className="text-2xl font-bold mb-2 drop-shadow-lg">首页内容</h2>
+            <p className="text-gray-700 drop-shadow-md">发布 B 站宣传片和公众号文章</p>
+          </Link>
           <Link
             href="/admin/programs"
             className="backdrop-blur-md bg-white/20 border border-white/30 rounded-2xl shadow-lg hover:shadow-2xl hover:bg-white/30 transform hover:scale-105 transition-all p-8 text-gray-800"

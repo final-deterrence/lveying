@@ -101,7 +101,7 @@ export default function DanmakuSettingsPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-100 p-4 text-gray-800">
+    <main className="festival-backdrop min-h-screen p-4 text-gray-800">
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex flex-wrap justify-between gap-3 items-center">
           <h1 className="text-2xl font-bold">限流与自动审核</h1>

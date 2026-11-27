@@ -287,7 +287,7 @@ export default function AdminProgramsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-6">
+      <div className="festival-backdrop min-h-screen p-6">
         <div className="max-w-6xl mx-auto">
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-green-500 border-t-transparent"></div>
@@ -299,7 +299,7 @@ export default function AdminProgramsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-6">
+    <div className="festival-backdrop min-h-screen p-6">
       <div className="max-w-6xl mx-auto">
         {/* 标题和进度 */}
         <div className="mb-8">

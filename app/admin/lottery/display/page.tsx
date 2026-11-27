@@ -392,6 +392,7 @@ export default function LotteryDisplayPage() {
       .control-head,.nav,.fields{display:flex;align-items:center;gap:10px}.control-head{justify-content:space-between;margin-bottom:12px}
       .controls label{display:block;margin-top:10px}.fields label{flex:1;min-width:0}.controls select,.controls input{display:block;width:100%;background:#1c2d27;border:1px solid #52665c;color:white;padding:6px;border-radius:4px}
       .controls button{padding:6px 10px;background:#25463a;border:1px solid #5d8976;color:white;border-radius:4px}.controls button:disabled{opacity:.45}.nav{margin:12px 0}.controls p{color:#c1ccc6;margin:8px 0 0}.controls p[role=alert]{color:#ffad9b}
+      @media(max-width:640px){.controls{right:12px;left:12px;width:auto}.controls select,.controls input{font-size:16px}}
     `}</style>
   </>;
 }

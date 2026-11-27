@@ -43,7 +43,7 @@ export default function LotteryPage() {
 
   return <main className="min-h-screen bg-[#10191d] text-[#f0e6d3]">
     <GuestNavBar dark />
-    <div className="mx-auto max-w-5xl px-4 pb-16 pt-28 sm:px-8">
+    <div className="mx-auto max-w-5xl px-4 pb-16 pt-24 sm:px-8 sm:pt-28">
       <h1 className="mb-7 border-b border-[#53615f] pb-5 text-3xl font-bold tracking-tight sm:text-4xl">抽奖结果</h1>
       {error && <p role="alert" className="mb-5 rounded border border-[#7f5b48] bg-[#30231d] px-4 py-3 text-[#f4ca9e]">
         连接暂时中断，正在重试。

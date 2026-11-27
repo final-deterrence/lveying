@@ -3,17 +3,11 @@ import './globals.css'
 import TitleManager from '@/components/TitleManager'
 
 export const metadata: Metadata = {
-  title: '无间道-电子系第27届学生节',
-  description: '欢迎参加电子系第27届学生节',
+  title: '无间道 · 清华大学电子系学生节',
+  description: '清华大学电子系学生节晚会的节目单、弹幕和抽奖结果。',
   icons: {
-    icon: [
-      { url: '/favicon-16.png?v=3', sizes: '16x16', type: 'image/png' },
-      { url: '/favicon-32.png?v=3', sizes: '32x32', type: 'image/png' },
-      { url: '/favicon-48.png?v=3', sizes: '48x48', type: 'image/png' }
-    ],
-    apple: [
-      { url: '/apple-touch-icon.png?v=3', sizes: '180x180', type: 'image/png' }
-    ]
+    icon: '/theme/icon.png',
+    apple: '/theme/icon.png',
   },
 }
 
