@@ -3,11 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import LotteryStage, { type StageCue, type StageFilm } from '@/components/lottery/LotteryStage';
-import { rooftop } from '@/public/wujiandao/cues.mjs';
 import { isTicketRange, MAX_TICKET_NUMBER } from '@/public/wujiandao/tickets.mjs';
-import { awards, awardKeys, buildStageView, chapterStart, chapterStarts, formatNumber, initialStage, program, restoreRevealOrder, scenes, STAGE_STATE_KEY, type Completed, type DrawRequest, type StageState } from '@/lib/lotteryStage';
+import { awards, awardKeys, buildStageView, chapterStart, chapterStarts, formatNumber, initialStage, isSteppedAward, program, restoreRevealOrder, scenes, STAGE_STATE_KEY, type Completed, type DrawRequest, type StageState } from '@/lib/lotteryStage';
 import { useStageBroadcast } from '@/lib/useLotteryStageSync';
-import type { LotteryConfig, LotteryResult, StageAward } from '@/types';
+import type { LotteryConfig, LotteryResult } from '@/types';
 
 class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -22,8 +21,8 @@ async function lotteryApi(method: string, body?: unknown, resource = 'draw') {
   return data;
 }
 
-function completedBatch(request: DrawRequest, result: LotteryResult, order?: number[]): Completed {
-  return { request: { ...request, id: result.id }, result, revealed: result.numbers.length,
+function completedBatch(request: DrawRequest, result: LotteryResult, order?: number[], revealed = result.revealedCount ?? result.numbers.length): Completed {
+  return { request: { ...request, id: result.id }, result, revealed,
     revealOrder: order ?? result.numbers.map((_, i) => i) };
 }
 const emptyBatch = { request: null, result: null, revealed: 0, revealOrder: undefined, replacementSeat: undefined };
@@ -81,15 +80,19 @@ export default function LotteryDisplayPage() {
       const raw = localStorage.getItem(STAGE_STATE_KEY);
       const saved: StageState = { ...initialStage, ...(raw ? JSON.parse(raw) : {}), usedNumbers: server.usedNumbers };
       const pending: LotteryResult | null = server.result;
-      if (pending && pending.id !== saved.request?.id) throw new Error('另一台导播设备有尚未揭晓的旧批次，请在原设备完成揭晓。');
+      const stageAwardIds = new Set(Object.values(server.awards as Record<string, LotteryResult | undefined>).filter((r): r is LotteryResult => !!r).map(r => r.id));
+      if (pending && !stageAwardIds.has(pending.id) && pending.id !== saved.request?.id) throw new Error('另一台导播设备有尚未揭晓的旧批次，请在原设备完成揭晓。');
       const completed = { ...saved.completed };
+      let partialScene: number | null = null;
       for (const key of awardKeys) {
         const index = awards[key].scene;
         const result: LotteryResult | undefined = server.awards[key];
         if (result) {
+          const revealed = result.revealedCount ?? result.numbers.length;
           const earlier = completed[index]?.result.id === result.id ? completed[index] : saved.result?.id === result.id ? saved : undefined;
           completed[index] = completedBatch({ id: result.id, award: key, config: { ...cfg, title: result.title, count: result.numbers.length } },
-            result, earlier ? restoreRevealOrder(result.numbers.length, result.numbers.length, earlier.revealOrder) : undefined);
+            result, earlier ? restoreRevealOrder(result.numbers.length, revealed, earlier.revealOrder) : undefined, revealed);
+          if (revealed < result.numbers.length) partialScene = index;
         }
         else if (completed[index]?.request.award) delete completed[index];
       }
@@ -100,6 +103,8 @@ export default function LotteryDisplayPage() {
       const previous = completed[saved.scene] ?? (saved.scene === 16 ? completed[15] : undefined);
       if (completed[15]?.result.pendingTicket !== undefined) {
         Object.assign(saved, completed[15], { scene: 15, rolling: true, replacementSeat: undefined });
+      } else if (partialScene !== null) {
+        Object.assign(saved, completed[partialScene], { scene: partialScene, rolling: false, replacementSeat: undefined });
       } else if (previous) Object.assign(saved, previous, { rolling: saved.rolling && saved.result?.id === previous.result.id && saved.result?.pendingTicket === undefined });
       else if (pending) Object.assign(saved, { result: pending, rolling: false, revealed: pending.revealedCount ?? 0,
         revealOrder: restoreRevealOrder(pending.numbers.length, pending.revealedCount ?? 0, saved.revealOrder) });
@@ -142,7 +147,7 @@ export default function LotteryDisplayPage() {
     if (!config || lock.current || !scenes[index]) return;
     if (s.result?.pendingTicket !== undefined) { setControls(true); setError('请先确认当前席位的补抽'); return; }
     if (s.request && (!s.result || s.revealed < s.result.numbers.length)) {
-      setControls(true); setError('请先重试本次开奖，再切换场景。'); return;
+      setControls(true); setError(s.result ? '请先完成本档剩余席位的揭晓，再切换场景。' : '请先重试本次开奖，再切换场景。'); return;
     }
     const previous = s.completed[index] ?? (index === 16 ? s.completed[15] : undefined);
     setError(''); setTicketChoice('');
@@ -152,6 +157,10 @@ export default function LotteryDisplayPage() {
   function step(direction: number) {
     const s = latest.current;
     const index = s.scene;
+    if (direction < 0 && config && !lock.current && scenes[index].draw && s.result && s.rolling && s.revealed > 0 && s.revealed < s.result.numbers.length) {
+      save({ ...s, rolling: false, cueStartedAt: Date.now() });
+      return;
+    }
     if (direction < 0 && config && !lock.current && scenes[index].draw && s.result && !s.rolling && s.revealed === s.result.numbers.length) {
       save({ ...s, rolling: true, replacementSeat: undefined, cueStartedAt: Date.now() });
       return;
@@ -176,34 +185,53 @@ export default function LotteryDisplayPage() {
       const s = latest.current;
       if (s.result && s.revealed === s.result.numbers.length) return;
       const request: DrawRequest = s.request ?? { id: newDrawId(), award: scene.award, config: { ...config, ...draft } };
+      const stepped = request.award ? isSteppedAward(request.award, request.config.count) : false;
       save({ ...s, rolling: !s.result, request });
       let result: LotteryResult;
       try {
-        result = s.result ?? (await lotteryApi('POST', request)).result;
+        result = s.result ?? (await lotteryApi('POST', stepped ? { ...request, revealCount: 1 } : request)).result;
         // Finish a pending draw made by the old two-step implementation with its original ID.
         if (!request.award) await lotteryApi('PUT', { id: result.id, count: result.numbers.length });
       } catch (e) {
         if (e instanceof ApiError && e.status === 400 && !s.result) save({ ...s, request: null, rolling: true });
         throw e;
       }
-      const batch = completedBatch(request, result, s.revealOrder);
+      const revealed = request.award ? (result.revealedCount ?? result.numbers.length) : result.numbers.length;
+      const batch = completedBatch(request, result, s.revealOrder, revealed);
       save({ ...s, ...batch, rolling: result.pendingTicket !== undefined, cueStartedAt: Date.now(),
-        completed: { ...s.completed, [s.scene]: batch }, usedNumbers: Array.from(new Set([...(s.usedNumbers ?? []), ...result.numbers])) });
+        completed: { ...s.completed, [s.scene]: batch }, usedNumbers: Array.from(new Set([...(s.usedNumbers ?? []), ...result.numbers.slice(0, revealed)])) });
+    });
+  }
+  function revealNext() {
+    void perform(async () => {
+      const s = latest.current;
+      if (!s.result || !s.request || s.revealed >= s.result.numbers.length) return;
+      const nextCount = s.revealed + 1;
+      await lotteryApi('PUT', { id: s.result.id, count: nextCount });
+      const updatedResult: LotteryResult = nextCount >= s.result.numbers.length
+        ? (() => { const copy = { ...s.result }; delete copy.revealedCount; return copy; })()
+        : { ...s.result, revealedCount: nextCount };
+      const batch = completedBatch(s.request, updatedResult, s.revealOrder, nextCount);
+      save({ ...s, ...batch, rolling: false, cueStartedAt: Date.now(),
+        completed: { ...s.completed, [s.scene]: batch }, usedNumbers: Array.from(new Set([...(s.usedNumbers ?? []), ...updatedResult.numbers.slice(0, nextCount)])) });
     });
   }
   function advance() {
     if (!config || lock.current) return;
     const s = latest.current, here = scenes[s.scene];
-    if (here.draw && (!s.request || (s.result && s.revealed === s.result.numbers.length))) {
+    if (here.draw && (!s.request || !!s.result)) {
       const cue = film.current?.advanceCue(here.film, s.cueStartedAt);
       if (!cue || cue.action === 'wait') return;
       if (cue.action === 'finish') { save({ ...s, cueStartedAt: cue.startedAt }); return; }
     }
     if (here.draw && s.rolling && s.result?.pendingTicket !== undefined) {
       updateTicket('replace', s.result.pendingTicket);
+    } else if (here.draw && s.result && s.revealed < s.result.numbers.length) {
+      if (s.rolling) revealNext();
+      else save({ ...s, rolling: true, cueStartedAt: Date.now() });
     } else if (here.draw && s.rolling && s.result && s.revealed === s.result.numbers.length) {
       save({ ...s, rolling: false, cueStartedAt: Date.now() });
-    } else if (here.draw && (!s.result || s.revealed < s.result.numbers.length)) draw();
+    } else if (here.draw && !s.result) draw();
     else step(1);
   }
   function updateTicket(action: 'withdraw' | 'replace', number: number) {
@@ -240,8 +268,12 @@ export default function LotteryDisplayPage() {
   }
 
   useEffect(() => {
-    if (!config || state.scene !== 12) return;
-    const timer = window.setTimeout(() => move(15, true), Math.max(0, (state.cueStartedAt ?? Date.now()) + rooftop.rollingAt * 1000 - Date.now()));
+    const autoNext: Record<number, [number, number]> = { 0: [1, 12300], 8: [9, 9800], 11: [12, 8100] };
+    const next = autoNext[state.scene];
+    if (!config || !next) return;
+    const timer = window.setTimeout(() => {
+      if (latest.current.scene === state.scene) move(next[0]);
+    }, Math.max(0, (state.cueStartedAt ?? Date.now()) + next[1] - Date.now()));
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.scene, state.cueStartedAt, config]);
@@ -291,7 +323,8 @@ export default function LotteryDisplayPage() {
     }
   }
   const phase=paintedCue?.film===scene.film && paintedCue.startedAt===state.cueStartedAt ? paintedCue.phase : 'painting';
-  const pending=!!state.request && (!state.result || state.revealed<state.result.numbers.length);
+  const pending=!!state.request && !state.result;
+  const partial=!!state.result && state.revealed<state.result.numbers.length;
   function nextAction(){
     if(!config)return '载入导播台…';
     if(busy)return '处理中…';
@@ -300,8 +333,16 @@ export default function LotteryDisplayPage() {
     if(scene.draw){
       if(phase==='painting')return '画面就绪中…';
       if(phase==='entering')return '快进到滚号';
+      if(partial){
+        if(phase==='revealing')return '快进到当前号码';
+        return state.rolling?`确认开奖（第 ${state.revealed+1}/${state.result!.numbers.length} 位）`:`滚动第 ${state.revealed+1}/${state.result!.numbers.length} 位`;
+      }
       if(phase==='revealing')return '快进到完整名单';
-      if(phase==='rolling')return replacing?'确认补抽':state.result?'揭晓原号码':'确认开奖';
+      if(phase==='rolling'){
+        if(replacing)return '确认补抽';
+        if(state.result)return '揭晓原号码';
+        return isSteppedAward(scene.award, draft.count)?`确认开奖（第 1/${draft.count} 位）`:'确认开奖';
+      }
     }
     const next=program.find(index=>index>state.scene);
     if(next!==undefined && scenes[next].draw)return '进入滚号';

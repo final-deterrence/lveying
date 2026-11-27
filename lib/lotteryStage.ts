@@ -57,6 +57,8 @@ export const STAGE_STATE_KEY = 'wujian-lottery-stage-v1';
 export const STAGE_VIEW_KEY = 'wujian-lottery-screen-v1';
 export const STAGE_CHANNEL = 'wujian-lottery-screen-v1';
 export const formatNumber = formatTicket;
+export const isSteppedAward = (award: StageAward, count: number): boolean =>
+  award === 'first' && count >= 2 && count <= 6;
 
 // 只打乱展示位置，不改变服务器中奖记录和公开结果的顺序。
 export function createRevealOrder(count: number): number[] {
@@ -92,6 +94,7 @@ export type StageView = {
   title: string;
   phase: 'standby' | 'rolling' | 'masking' | 'revealing' | 'complete';
   slots: (number | null)[];
+  activeSlot?: number;
   replacementSlot?: number;
   heroNumbers: number[];
   minNumber: number;
@@ -113,23 +116,31 @@ export function buildStageView(state: StageState, config: LotteryConfig, masking
   const slots: (number | null)[] = Array(count).fill(null);
   const order = state.revealOrder;
   const validOrder = isRevealOrder(order, count);
+  const stepped = Boolean(scene.draw && isSteppedAward(scene.award, count));
+  const partial = Boolean(state.result && state.revealed < count);
+  const stepRolling = Boolean(stepped && state.rolling && (!state.result || partial));
+  const activeSlot = stepRolling ? (state.result ? state.revealed : 0) : undefined;
   const pendingTicket = scene.award === 'grand' && scene.draw ? state.result?.pendingTicket : undefined;
   const pendingIndex = pendingTicket === undefined ? -1 : state.result!.numbers.indexOf(pendingTicket);
   const replacementSlot = pendingIndex >= 0 ? (validOrder ? order![pendingIndex] : pendingIndex)
     : scene.draw && scene.award === 'grand' && !state.rolling ? state.replacementSeat : undefined;
-  if (state.result && maskingStartedAt === null && (!state.rolling || pendingIndex >= 0)) {
+  if (state.result && maskingStartedAt === null && (!state.rolling || pendingIndex >= 0 || (stepped && partial))) {
     for (let i = 0; i < Math.min(state.revealed, count); i++) {
       if (i === pendingIndex) continue;
       // 旧批次没有位置表时保持原布局，避免升级后已揭晓号码跳动。
       slots[validOrder ? order![i] : i] = state.result.numbers[i];
     }
   }
+  const hidden = state.result && partial ? new Set(state.result.numbers.slice(state.revealed)) : null;
+  const rawExcluded = state.rolling && pendingIndex < 0 && !partial && state.result && state.revealed === state.result.numbers.length
+    ? (state.usedNumbers ?? []).filter(n => !state.result!.numbers.includes(n)) : state.usedNumbers ?? [];
+  const excluded = hidden ? rawExcluded.filter(n => !hidden.has(n)) : rawExcluded;
   return {
     film: scene.film, award: scene.award, cueStartedAt: state.cueStartedAt ?? 0,
     counts: { ...counts, ...(count ? { [scene.award]: count } : {}) },
-    excluded: state.rolling && pendingIndex < 0 && state.result && state.revealed === state.result.numbers.length
-      ? (state.usedNumbers ?? []).filter(n => !state.result!.numbers.includes(n)) : state.usedNumbers ?? [],
+    excluded,
     scene: state.scene, batchId: state.result?.id ?? null, title: draft?.title ?? '', slots: scene.draw ? slots : [],
+    ...(maskingStartedAt === null && activeSlot !== undefined ? { activeSlot } : {}),
     ...(maskingStartedAt === null && replacementSlot !== undefined ? { replacementSlot } : {}),
     phase: maskingStartedAt !== null ? 'masking' : state.rolling ? 'rolling'
       : state.result ? (state.revealed >= state.result.numbers.length ? 'complete' : 'revealing') : 'standby',

@@ -50,7 +50,8 @@ const reviewJoin = 'FROM danmakus d LEFT JOIN danmaku_reviews r ON r.danmaku_id 
 
 function resultFromRow(row: Row): LotteryResult {
   return { id: String(row.id), title: String(row.title), numbers: JSON.parse(String(row.numbers)), timestamp: Number(row.timestamp),
-    ...(row.pending_ticket == null ? {} : { pendingTicket: Number(row.pending_ticket) }) };
+    ...(row.pending_ticket == null ? {} : { pendingTicket: Number(row.pending_ticket) }),
+    ...(row.unpublished != null && row.revealed_count != null ? { revealedCount: Number(row.revealed_count) } : {}) };
 }
 
 export class DataStore {
@@ -204,13 +205,16 @@ export class DataStore {
   }
 
   getStageAwards(): Partial<Record<StageAward, LotteryResult>> {
-    const rows = this.db.prepare(`SELECT a.award, r.*, t.number AS pending_ticket FROM lottery_stage_awards a
+    const rows = this.db.prepare(`SELECT a.award, r.*, t.number AS pending_ticket, p.revealed_count, u.result_id AS unpublished
+      FROM lottery_stage_awards a
       JOIN lottery_results r ON r.id = a.result_id
-      LEFT JOIN lottery_ticket_replacements t ON t.result_id=r.id AND t.substitute IS NULL`).all();
+      LEFT JOIN lottery_ticket_replacements t ON t.result_id=r.id AND t.substitute IS NULL
+      LEFT JOIN lottery_reveal_progress p ON p.result_id = r.id
+      LEFT JOIN lottery_unpublished u ON u.result_id = r.id`).all();
     return Object.fromEntries(rows.map(row => [String(row.award), resultFromRow(row)]));
   }
 
-  drawLottery(id: string, config: LotteryConfig, award?: StageAward): LotteryResult {
+  drawLottery(id: string, config: LotteryConfig, award?: StageAward, revealCount?: number): LotteryResult {
     const title = typeof config.title === 'string' ? config.title.trim() : '';
     const requestConfig = JSON.stringify({ minNumber: config.minNumber, maxNumber: config.maxNumber, count: config.count, title });
     return transaction(this.db, () => {
@@ -225,6 +229,9 @@ export class DataStore {
         return award ? this.getStageAwards()[award]! : result;
       }
       validateLotteryConfig(config);
+      if (revealCount !== undefined && (!Number.isSafeInteger(revealCount) || revealCount < 1 || revealCount > config.count)) {
+        throw new LotteryError('无效的初始揭晓数量');
+      }
       // 两个导播窗口同时确认同一档时，后到的请求读取已提交的那一批。
       if (award) {
         const recorded = this.getStageAwards()[award];
@@ -232,12 +239,14 @@ export class DataStore {
       }
       if (this.db.prepare('SELECT 1 FROM lottery_unpublished LIMIT 1').get()) throw new LotteryError('已有未揭晓的抽奖结果，请先恢复并揭晓');
       const numbers = this.sampleTickets(config);
-      const result = { id, title, numbers, timestamp: Date.now() };
+      const initialRevealed = award ? (revealCount ?? numbers.length) : 0;
+      const result: LotteryResult = { id, title, numbers, timestamp: Date.now(),
+        ...(award && initialRevealed < numbers.length ? { revealedCount: initialRevealed } : {}) };
       this.db.prepare('INSERT INTO lottery_results (id, title, numbers, timestamp) VALUES (?, ?, ?, ?)')
         .run(id, result.title, JSON.stringify(numbers), result.timestamp);
       if (award) this.db.prepare('INSERT INTO lottery_stage_awards VALUES (?, ?)').run(award, id);
-      else this.db.prepare('INSERT INTO lottery_unpublished VALUES (?)').run(id);
-      this.db.prepare('INSERT INTO lottery_reveal_progress VALUES (?, ?)').run(id, award ? numbers.length : 0);
+      if (!award || initialRevealed < numbers.length) this.db.prepare('INSERT INTO lottery_unpublished VALUES (?)').run(id);
+      this.db.prepare('INSERT INTO lottery_reveal_progress VALUES (?, ?)').run(id, initialRevealed);
       this.db.prepare('INSERT INTO lottery_draw_requests VALUES (?, ?)').run(id, requestConfig);
       return result;
     });

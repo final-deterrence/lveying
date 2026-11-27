@@ -98,12 +98,15 @@ function present(view) {
   const numbers = hero ? view.heroNumbers : view.slots;
   const isDraw = view.film.startsWith('roll-');
   const replacing = isDraw && Number.isInteger(view.replacementSlot) && view.phase==='rolling';
-  const result = hero ? numbers.length > 0 : isDraw && !replacing && numbers.some(n => n !== null);
+  const activeSlot = isDraw && Number.isInteger(view.activeSlot) && view.phase==='rolling' ? view.activeSlot : null;
+  const stepped = isDraw && activeSlot !== null;
+  const result = hero ? numbers.length > 0 : isDraw && !replacing && !stepped && numbers.some(n => n !== null);
   const phase = result ? 'result' : isDraw ? 'roll' : 'scene';
   const id = result ? 'done-'+key : hero ? 'roof' : view.film;
   const now = performance.now();
   const changed = current?.id !== id || cueStartedAt !== view.cueStartedAt;
   const finishing=changed&&current?.id===id&&current.prize===key&&phase!=='scene'&&view.cueStartedAt<cueStartedAt;
+  const prevActive = state.activeSlot ?? null;
   if (changed&&!finishing) {
     const liveStop = current?.view === 'roll' && current.prize === key && result && Date.now()-view.cueStartedAt < 3000;
     if (liveStop) { if (key==='third') captureCipherCue(); else recordAwardCue(); }
@@ -114,13 +117,21 @@ function present(view) {
     if(view.film==='call')callDeskStart=previousFrame?.phoneView??ringDeskView(firstRingAt+ringPeriod+2);
     if (phase === 'roll') {
       liveCipherFeed=null; liveCipherCue=null; lastAwardFeed=null; awardCue=null;
-      if (key==='grand') roofRollOrigin=previousFrame?.roofAge>=roofPushFrom ? previousFrame.roofAge : roofRollAt;
+      state.settledSlot=null;
+      if (key==='grand') roofRollOrigin=previousFrame?.roofAge>=roofPushTo ? roofNumbersAt : previousFrame?.roofAge>=roofPushFrom ? previousFrame.roofAge : roofRollAt;
       if(key==='third'){
         rollEntryDuration=previousFrame?.readerEntry?readerPushSeconds:0;
         rollTapeOrigin=previousFrame?.readerEntry?.time??0;
       }
       else if(key==='grand'&&previousFrame?.roofAge>=roofPushFrom)rollEntryDuration=Math.max(0,roofRollAt-roofRollOrigin);
       else rollEntryDuration=previousFrame?awardTiming[key].entry:0;
+    } else if (result && key==='first') {
+      let lastLocked=-1;
+      for(let i=numbers.length-1;i>=0;i--)if(numbers[i]!==null){lastLocked=i;break;}
+      state.settledSlot=(numbers.some(n=>n===null) || (liveStop && prevActive!==null))
+        ? (prevActive!==null ? prevActive : lastLocked) : null;
+    } else {
+      state.settledSlot=null;
     }
     current = {id, prize:key, view: phase==='scene' ? undefined : phase};
   }
@@ -130,23 +141,25 @@ function present(view) {
   }
   state.counts = view.counts;
   state.replacementSlot=isDraw&&Number.isInteger(view.replacementSlot)?view.replacementSlot:null;
-  state.pinned=replacing?numbers:null;
+  state.activeSlot=activeSlot;
+  state.pinned=replacing||stepped?numbers:null;
   if (result) state.draws[key] = numbers;
   passingDeck(view);
   art = {third:'radio',second:'archive',first:'phone',grand:'roof'}[key];
   screen.dataset.scene = view.film; screen.dataset.view = phase;
   if(changed)setCue('painting');
   canvas.setAttribute('aria-label',view.title || ({third:'截获密电',second:'机密档案',first:'秘密接头',grand:'天台对峙'}[key]));
-  const labels = result || replacing ? numbers.filter(n=>n!==null).map(formatTicket) : [];
+  const labels = result || replacing || stepped ? numbers.filter(n=>n!==null).map(formatTicket) : [];
   if (board.dataset.values !== labels.join(',')) {
     board.dataset.values=labels.join(',');
     board.replaceChildren(...labels.map(n=>{ const cell=document.createElement('li'); cell.textContent=n; return cell; }));
   }
-  if (changed) live.textContent = result ? (view.title || '特等奖')+'已揭晓' : '';
+  if (changed) live.textContent = result ? (view.title || '特等奖')+(numbers.some(n=>n===null)?'已揭晓 '+labels.length+' 位':'已揭晓') : '';
   startPaint();
 }
 function resultDuration() {
   const key=current.prize;
+  if(key==='first'&&state.settledSlot!=null)return .45+(animateReveal&&awardCue?.key===key?awardCue.lead:0);
   return key==='third' ? (liveCipherCue?.delay??0)+cipherRest(state.counts.third)
     : awardTiming[key].hold+(animateReveal&&awardCue?.key===key?awardCue.lead:0);
 }
@@ -983,8 +996,8 @@ function resize(){
   const propSounds={
     'cipher-brief':[[transportBiteAt,172,76,.09,.038],[transportBiteAt+.12,92,117,.64,.023]],
     splice:[[5.92,350,167,.06,.019],[10.43,439,196,.062,.029],[11.60,201,87,.093,.042]],
-    'film-roll':[[.43,110,148,.44,.024],[1.81,291,96,.081,.022]],
-    'carrier-roll':[[.45,221,101,.071,.045],[1.23,166,92,.112,.031]],
+    'film-roll':[[.18,110,148,.35,.024],[.82,291,96,.081,.022]],
+    'carrier-roll':[[.22,221,101,.071,.045],[.60,166,92,.112,.031]],
   };
   function playPropSounds(shot,age,view){
     if(reduced.matches||view==='roll'&&rollEntryDuration===0)return;
@@ -1014,15 +1027,21 @@ function resize(){
           if(state.counts.third>=4)tone(462,535,.056,.029,'sine',delay+cipherMiddleStop);
           if(state.counts.third>1)tone(610,620,.075,.036,'sine',delay+cipherLastStop);
         }else if(shot==='silver-print'){
-          tone(791,168,.042,.068,'triangle',lead+.13);tone(331,292,.89,.048,'sine',lead+.40);
-          tone(493,461,.56,.022,'sine',lead+1.06);
+          tone(791,168,.042,.068,'triangle',lead+.05);tone(331,292,.65,.048,'sine',lead+.20);
+          tone(493,461,.40,.022,'sine',lead+.68);
         }else if(shot==='phosphor-print'){
-          for(let i=0;i<Math.min(3,state.counts.first);i++){
-            tone(610+i*78,590+i*78,.091,.065,'sine',lead+contactClicks[i]);
-            tone(183,88,.047,.052,'triangle',lead+contactClicks[i]+.045);
+          if(state.settledSlot!=null){
+            const idx=Math.min(2,state.settledSlot);
+            tone(610+idx*78,590+idx*78,.091,.068,'sine',lead+.06);
+            tone(183,88,.047,.054,'triangle',lead+.105);
+          }else{
+            for(let i=0;i<Math.min(3,state.counts.first);i++){
+              tone(610+i*78,590+i*78,.091,.065,'sine',lead+contactClicks[i]);
+              tone(183,88,.047,.052,'triangle',lead+contactClicks[i]+.045);
+            }
           }
         }else{
-          tone(82,69,.65,.081,'sine',lead+.62);tone(207,203,.40,.040,'sine',lead+.83);
+          tone(82,69,.65,.081,'sine',lead+.26);tone(207,203,.40,.040,'sine',lead+.40);
         }
       }
       else if(view==='roll'&&age<.3){
@@ -2176,19 +2195,17 @@ function doorView(g,mark,t){
   g.restore();
 }
 function headTurn(t){
-  const listen=ease(t,3.57,3.99)*(1-ease(t,4.15,5.06));
-  const turn=ease(t,4.64,6.31),brace=1-ease(t,10.83,roofPushTo);
+  const notice=ease(t,3.60,4.35)*(1-ease(t,4.85,5.95));
   const speak=ease(t,rooftop.firstLineAt-.28,rooftop.firstLineAt+.51)*(1-ease(t,8.10,8.98));
   const considers=ease(t,rooftop.replyAt+.37,rooftop.replyAt+1.06)*(1-ease(t,10.40,roofPushFrom-.06));
   const easeOff=ease(t,11.14,12.10)*(1-ease(t,12.54,14.04));
-  const weight=ease(t,4.18,4.99)*(1-ease(t,5.3,6.55));
-  const release=ease(t,4.63,5.83)*(1-.61*ease(t,8.29,9.10));
-  const pivot=ease(t,4.47,4.86)*(1-ease(t,4.99,5.45));
-  return {glance:ease(t,3.93,5.26),turn,weight,a:[-17.4,0],b:[5.2,0],aPitch:0,bPitch:.14*pivot,
-    hips:brace*(-2.4+4.2*turn)+1.05*considers+.91*easeOff-2.1,release:.75*release,breath:2.1*speak+1.4*listen-.57*considers-.73*easeOff,
-    hem:3.6*Math.sin(Math.PI*turn)+1.8*easeOff,lean:.72*((.049-.054*turn)*brace-.023*speak-.030*considers),
-    shoulder:(-.048+.045*turn)*brace+.034*speak+.016*considers-.022*easeOff,
-    nod:.038+.65*(-.10*listen-.105*speak+.046*weight+.081*considers+.026*easeOff)};
+  return {glance:1,turn:1,weight:0,a:[-17.4,0],b:[5.2,0],aPitch:0,bPitch:0,
+    hips:.65*considers+.55*easeOff,release:0,
+    breath:1.6*speak+.9*notice-.45*considers-.55*easeOff,
+    hem:.8+.55*Math.sin(t*1.4)+.7*easeOff,
+    lean:-.014*speak-.018*considers,
+    shoulder:.022*speak+.012*considers-.014*easeOff,
+    nod:.028+.60*(-.045*notice-.082*speak+.062*considers+.020*easeOff)};
 }
 function jamb(g,x,travel){
   g.save();g.transform(1-.09*travel,0,-.041,1,x,0);
@@ -2300,8 +2317,8 @@ function portraitTake(g,t,glassTime,quiet,count){
       const reply=rooftop.replyAt;
       const inhale=ease(t,reply-.51,reply-.08)*(1-ease(t,reply+.11,reply+.65));
       const answer=ease(t,reply-.29,reply+.35)*(1-ease(t,reply+.79,reply+1.72));
-      return {...step,glance:.19+.81*ease(t,4.06,5.31)-.105*listen,
-        turn:.28+.72*ease(t,4.64,6.83),settle:brake,restWeight:rest,
+      return {...step,glance:1,
+        turn:1,settle:brake,restWeight:rest,
         aPitch:step.aPitch+.108*rest,hips:.83*step.swing+4.4*rest+.72*answer,
         torsoPitch:.020*step.moving+.006*step.swing-.014*brake-.010*rest+.019*answer,
         nod:-.033*notice+.079*listen-.090*answer+.011*step.swing,breath:1.16*inhale-.28*listen,
@@ -2450,13 +2467,9 @@ function portraitTake(g,t,glassTime,quiet,count){
     g.restore();
     finishFilm(g,age,reduced.matches);
   }
-  function rooftopArrival(g,age,plate,clock,preview){
-    const open=reduced.matches?0:smooth((age-roofNumbersAt)/(roofRollAt-roofNumbersAt));
+  function rooftopArrival(g,age,plate){
+    // Hold cleanly on the framed silhouettes until the director cues rolling on the host's prompt.
     roofTake(g,age);
-    if(open>0){
-      const feed=candidateStream('grand',clock,preview);
-      identityNumbers(g,state.counts.grand,age,feed,null,null,open);
-    }
     if(plate&&age<.35){g.save();g.globalAlpha=1-smooth(age/.35);impressions(g,plate);g.restore();}
     if(g===ctx)liveRoofAge=age;
   }
@@ -2631,7 +2644,7 @@ function portraitTake(g,t,glassTime,quiet,count){
   function contactPrint(g,count,time,feed,values,age){
     materialPlate(g,'second',count,archiveStock);
     const m=contactLayout(count),rolling=age===null;
-    const sweep=rolling?0:clamp((age-.12)/1.56),tip=mix(-.14,1.14,smooth(sweep));
+    const sweep=rolling?0:clamp((age-.04)/.88),tip=mix(-.14,1.14,smooth(sweep));
     const width=m.right-m.left,height=m.bottom-m.top;
     const edgeAt=y=>{
       const v=(y-m.top)/height;
@@ -2948,7 +2961,7 @@ function portraitTake(g,t,glassTime,quiet,count){
     }
     stroke(g,pts,color,1.55);
   }
-  const contactClicks=[.28,1.04,1.80];
+  const contactClicks=[.16,.68,1.20];
   function channelFor(i,count){return Math.floor(i*Math.min(3,count)/count);}
   function chartRecorder(g,time,age,feed,m,lastClick){
     const rolling=age===null,at=rolling?0:age,tip=838,pitch=18;
@@ -2986,9 +2999,13 @@ function portraitTake(g,t,glassTime,quiet,count){
   function lineMonitor(g,count,time,feed,values,age,incomingNeedle){
     materialPlate(g,'first',count,switchboardStock);
     const m=ticketLayout('first',count),rolling=age===null;
+    const steppedRoll=rolling&&state.activeSlot!=null;
+    const steppedResult=!rolling&&state.settledSlot!=null;
     const channels=Math.min(3,count);
     let activity=1;
-    if(!rolling){
+    if(steppedResult){
+      activity=1-smooth((age-.06)/.34);
+    }else if(!rolling){
       activity=0;
       for(let i=0;i<channels;i++)activity+=(1-smooth((age-contactClicks[i])/.24))/channels;
     }
@@ -2998,9 +3015,22 @@ function portraitTake(g,t,glassTime,quiet,count){
     exchangeWave(g,373,82,394,22,time,activity*.92+.055,'#c0d2a1');
     for(let i=0;i<count;i++){
       const [x,y]=seatAt(m,i),lane=channelFor(i,count),at=contactClicks[lane];
-      const locked=!rolling&&age>=at,settle=locked?smooth((age-at)/.27):0;
-      const code=locked?formatTicket(values[i]):candidateAt(feed,i,count);
-      if(!code)continue;
+      let locked=false,settle=1,active=false,code='';
+      if(steppedRoll){
+        if(state.pinned?.[i]!=null){locked=true;settle=1;code=formatTicket(state.pinned[i]);}
+        else if(i===state.activeSlot){active=true;code=candidateAt(feed,i,count);}
+      }else if(steppedResult){
+        if(values?.[i]!=null){
+          locked=true;
+          settle=i===state.settledSlot?smooth((age-.06)/.34):1;
+          code=formatTicket(values[i]);
+        }
+      }else{
+        locked=!rolling&&age>=at;
+        settle=locked?smooth((age-at)/.27):0;
+        active=!locked;
+        code=locked?formatTicket(values[i]):candidateAt(feed,i,count);
+      }
       const bay=channelBay(m,x,y,count),readX=x+(m.channelStrip?m.w*.135:0),readY=bay?bay.readY:y;
       if(bay&&locked){
         g.save();g.beginPath();g.rect(x-m.w/2+5,y-m.h/2+5,m.w-10,m.h-10);g.clip();
@@ -3017,17 +3047,29 @@ function portraitTake(g,t,glassTime,quiet,count){
         contactLamp(g,pin,y,3.6,locked?1:.20+.18*(1+Math.sin(time*2+lane)),true);
       }else if(bay){
         g.save();g.beginPath();g.rect(bay.scopeX+2,bay.scopeTop+2,bay.scopeW-4,bay.sh-4);g.clip();
-        exchangeWave(g,bay.scopeX+4,bay.scopeY,bay.scopeW-8,bay.sh*.34,time+lane*2.13,locked?(1-settle)*.72+.03:.82,'#b7d2a0');
+        const waveStrength=locked?(1-settle)*.72+.03:active?.82:.015;
+        exchangeWave(g,bay.scopeX+4,bay.scopeY,bay.scopeW-8,bay.sh*.34,time+lane*2.13,waveStrength,locked||active?'#b7d2a0':'#657a67');
         g.restore();
-        contactLamp(g,bay.lampX,bay.scopeY,Math.min(4.2,bay.sh*.15),locked?1:.24+.16*(1+Math.sin(time*2.2+lane)),true);
+        const lampLevel=locked?1:active?.24+.18*(1+Math.sin(time*2.2+lane)):.06;
+        contactLamp(g,bay.lampX,bay.scopeY,Math.min(4.2,bay.sh*.15),lampLevel,true);
       }
-      const maxWidth=m.w*(m.channelStrip?.59:.88);
-      if(locked&&settle<1&&count<=12){g.save();g.globalAlpha*=1-settle;g.shadowColor='#ef9a47';g.shadowBlur=7;glassTicket(g,code,readX,readY,m.size,'#ffdb9b',maxWidth);g.restore();}
-      glassTicket(g,code,readX,readY,m.size,locked?'#ffdfa0':'#eab578',maxWidth);
-      if(!m.channelStrip&&!bay&&count<=24)contactLamp(g,x-m.w*.42,y-m.h*.36,Math.min(3,m.h*.045),locked?1:.24,true);
+      if(code){
+        const maxWidth=m.w*(m.channelStrip?.59:.88);
+        if(locked&&settle<1&&count<=12){g.save();g.globalAlpha*=1-settle;g.shadowColor='#ef9a47';g.shadowBlur=7;glassTicket(g,code,readX,readY,m.size,'#ffdb9b',maxWidth);g.restore();}
+        glassTicket(g,code,readX,readY,m.size,locked?'#ffdfa0':'#eab578',maxWidth);
+      }
+      if(!m.channelStrip&&!bay&&count<=24)contactLamp(g,x-m.w*.42,y-m.h*.36,Math.min(3,m.h*.045),locked?1:active?.24:.06,true);
     }
-    for(let i=0;i<channels;i++)contactLamp(g,453+i*44,132,3.1,rolling?.30+.2*Math.sin(time*2+i):smooth((age-contactClicks[i])/.12),false);
-    chartRecorder(g,time,age,feed,m,contactClicks[channels-1]);
+    for(let i=0;i<channels;i++){
+      let level=rolling?.30+.2*Math.sin(time*2+i):smooth((age-contactClicks[i])/.12);
+      if(steppedRoll||steppedResult){
+        const slotLocked=steppedRoll?state.pinned?.[i]!=null:values?.[i]!=null;
+        const slotActive=steppedRoll&&i===state.activeSlot;
+        level=slotLocked?(steppedResult&&i===state.settledSlot?smooth((age-.04)/.14):1):slotActive?.32+.2*Math.sin(time*2.2+i):.06;
+      }
+      contactLamp(g,453+i*44,132,3.1,level,false);
+    }
+    chartRecorder(g,time,age,feed,m,steppedResult?.36:contactClicks[channels-1]);
   }
   const pickupCable='M684 416C635 442 648 479 558 474S454 419 421 431C389 444 392 466 353 463L308 455';
   const pickupTrace=new Path2D(pickupCable);
@@ -3145,9 +3187,9 @@ function portraitTake(g,t,glassTime,quiet,count){
   }
 
   function grandCatch(i,count){
-    return count===1?.17:.48+.11*(i%Math.min(4,count))/Math.min(4,count);
+    return count===1?.04:.24+.10*(i%Math.min(4,count))/Math.min(4,count);
   }
-  const wheelSettleSeconds=.30;
+  const wheelSettleSeconds=.24;
   function identityFrame(g,count,time,feed,values,age,open=1){
     const lock=grandCatch(state.replacementSlot??Math.min(3,count-1),count)+wheelSettleSeconds;
     const quiet=age===null?0:smooth((age-lock+.06)/.20)*(.43-.21*smooth((age-lock-.43)/.49));
@@ -3185,7 +3227,7 @@ function portraitTake(g,t,glassTime,quiet,count){
 // The transport is built in the XY plane. The operator sees it from +Z.
 // The CRT aperture is shared by the physical camera and the live phosphor compositor.
 const readerAperture = {x: -.63, y: -1.21, z: .784, width: 3.58, height: 3.58 * 9 / 16};
-const readerPushSeconds = 2.85;
+const readerPushSeconds = 1.10;
 
 function makeReaderRig(T, output) {
   const renderer = new T.WebGLRenderer({canvas:output, alpha:false, antialias:true, powerPreference:'low-power'});
@@ -3752,7 +3794,7 @@ function readerCamera(g,time,focus,clock,count,feed,interceptAge=null){
 }
 function readerPush(g,plate,age,count,feed){
   const entry=plate.readerEntry;
-  const focus=smooth((age-.08)/(readerPushSeconds-.08));
+  const focus=smooth((age-.06)/(readerPushSeconds-.06));
   if(!readerPack){
     if(!entry.receiverGlass){cipherDisplay(g,feed.travel,count,feed,1);glassGrain(g);return;}
     const pose=blendPose(entry.receiverGlass,fullGate,focus);
@@ -3760,11 +3802,11 @@ function readerPush(g,plate,age,count,feed){
     g.save();usePose(g,pose.multiply(entry.receiverGlass.inverse()));impressions(g,plate);g.restore();
     g.save();usePose(g,pose);
     g.beginPath();g.roundRect(0,0,WIDTH,HEIGHT,25*(1-focus));g.clip();
-    g.globalAlpha*=smooth(age/.70);cipherDisplay(g,feed.travel,count,feed,focus);g.restore();
+    g.globalAlpha*=smooth(age/.50);cipherDisplay(g,feed.travel,count,feed,focus);g.restore();
     return;
   }
   g.save();
-  if(entry.framing)usePose(g,blendPose(entry.framing,fullGate,smooth(age/1.45)));
+  if(entry.framing)usePose(g,blendPose(entry.framing,fullGate,smooth(age/.75)));
   readerCamera(g,entry.time+age,focus,feed.travel,count,feed);
   g.restore();
   if(focus<1){
@@ -3843,8 +3885,8 @@ function readerPush(g,plate,age,count,feed){
     g.restore();
   }
 
-  const cipherBeatSeconds=.70, cipherMiddleStop=.55, cipherLastStop=1.20;
-  function cipherRest(count){return (count>1?cipherLastStop:0)+.48;}
+  const cipherBeatSeconds=.34, cipherMiddleStop=.28, cipherLastStop=.60;
+  function cipherRest(count){return (count>1?cipherLastStop:0)+.35;}
   let cipherStops=[], liveCipherFeed=null, liveCipherCue=null, rollTapeOrigin=0;
 
   function stopTimes(count){
@@ -4031,17 +4073,17 @@ function readerPush(g,plate,age,count,feed){
 
   function cipherDisplay(g,time,count,feed,focus,transport=rollTapeOrigin+time) {
     set(g,'cipher-glass',terminalGlass);
-    const open=smooth((focus-.34)/.42);
+    const open=smooth((focus-.12)/.45);
     const discharge=feed?.winners?smooth(feed.lockAge/cipherRest(count)):0;
     const sweepOrigin=feed?.winners?time-feed.lockAge:time;
     readerScope(g,time,transport,open,1-.95*discharge,mix((sweepOrigin*.31+.26)%1,1.19,discharge));
     if(!feed)return;
-    const gain=smooth((focus-.71)/.25);
+    const gain=smooth((focus-.28)/.38);
     if(gain<=0)return;
     const m=ticketLayout('third',count);
     g.save();g.globalAlpha=gain;
     signalLandscape(g,61,22,148,40,time,.47);
-    cipherRules(g,m);cipherCells(g,m,count,feed,time,smooth((focus-.74)/.26));
+    cipherRules(g,m);cipherCells(g,m,count,feed,time,smooth((focus-.30)/.36));
     keyedCarrier(g,transport,.81*(1-discharge));
     g.restore();
   }
@@ -4246,9 +4288,9 @@ function readerPush(g,plate,age,count,feed){
 
 
   const awardTiming={
-    second:{beat:.84,entry:2.30,hold:1.94},
-    first:{beat:.85,entry:2.42,hold:2.22},
-    grand:{beat:.71,entry:1.46,hold:1.62}
+    second:{beat:.30,entry:1.05,hold:1.05},
+    first:{beat:.16,entry:1.10,hold:1.55},
+    grand:{beat:.16,entry:.85,hold:.88}
   };
   let lastAwardFeed=null,awardCue=null;
   function recordAwardCue(){
@@ -4274,7 +4316,7 @@ function readerPush(g,plate,age,count,feed){
     }
     if(key==='grand'){
       const carried=Number.isFinite(plate?.roofAge)&&plate.roofAge>=roofPushFrom;
-      const open=smooth((feed.travel-roofNumbersAt)/(roofRollAt-roofNumbersAt))*(plate&&!carried?smooth(t/.64):1);
+      const open=smooth((feed.travel-roofNumbersAt)/(roofRollAt-roofNumbersAt))*(plate&&!carried?smooth(t/.45):1);
       identityFrame(g,n,feed.travel,feed,null,null,open);
       if(plate && t<awardTiming.grand.entry){
         if(Number.isFinite(plate.roofAge) && !carried){

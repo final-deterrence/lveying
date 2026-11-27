@@ -4,6 +4,6 @@ export const rooftop = Object.freeze({
   replyAt: 9.28,
   pushFrom: 11.8,
   framedAt: 17.1,
-  numbersAt: 17.55,
-  rollingAt: 18.6,
+  numbersAt: 17.20,
+  rollingAt: 17.75,
 });

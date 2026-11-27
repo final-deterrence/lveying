@@ -1,13 +1,13 @@
 // Figure coordinates are measured from the floor. Positive x is the direction of travel.
 const castHeads = {
   short: {
-    front: 'M-2 -31 C3.7 -31.8 9.2 -28.9 10.2 -24.8 C10.45 -22.5 9.3 -20.8 9.9 -19.65 Q11 -18.62 10.37 -17.85 C10.5 -16.68 11.74 -15.01 12.77 -13.81 Q13.17 -13.16 12.48 -12.83 L10.64 -12.59 L10.30 -11.39 Q10.94 -10.91 10.31 -10.50 L10.00 -10.22 L10.35 -9.56 L9.65 -8.99 Q9.18 -8.67 9.56 -7.54 Q9.72 -6.36 8.07 -6.02 C5.96 -5.64 4.61 -5.43 3.49 -4.34 Q2.47 -3.01 4.10 .66 L6.42 3.92',
-    back: 'M-2 -31 C-8.55 -31.31 -13.0 -27.9 -13.1 -21.25 Q-12.98 -18.75 -12.20 -16.46 L-11.03 -13.10 Q-10.57 -10.77 -9.07 -9.55 Q-7.16 -7.94 -7.52 -5.63 Q-7.92 -2.41 -10.94 2.5',
+    front: 'M-2 -31 C3.7 -31.8 9.2 -28.9 10.2 -24.8 C10.45 -22.5 9.3 -20.8 9.9 -19.65 Q10.95 -18.62 10.37 -17.85 C10.55 -16.62 11.74 -14.98 12.77 -13.81 Q13.16 -13.16 12.46 -12.82 Q11.45 -12.66 10.64 -12.50 Q10.30 -12.05 10.42 -11.38 Q10.96 -10.88 10.34 -10.42 Q10.00 -10.16 10.24 -9.86 Q10.56 -9.45 9.86 -8.94 Q9.25 -8.56 9.58 -7.45 Q9.70 -6.28 8.08 -5.98 C6.02 -5.60 4.66 -5.36 3.55 -4.25 Q2.58 -2.92 4.05 .65 L6.15 3.92',
+    back: 'M-2 -31 C-8.35 -31.25 -12.6 -27.8 -12.7 -21.25 Q-12.55 -18.70 -11.75 -16.40 L-10.65 -13.05 Q-10.20 -10.75 -8.85 -9.50 Q-7.25 -7.90 -7.58 -5.55 Q-7.95 -2.40 -10.45 2.5',
     neck: [2.35, -154.9], tilt: .104, nose: [12.77, -13.81]
   },
   long: {
-    front: 'M-2.2 -31.1 C1.9 -31.4 5.9 -30.2 8.4 -27.9 Q9.85 -26.6 10.30 -24.5 Q9.95 -23.5 9.18 -22.55 C9.12 -21.1 9.50 -19.4 10.14 -18.1 Q10.24 -17.55 9.72 -16.85 C10.50 -15.35 11.55 -13.75 12.28 -12.45 Q12.56 -11.92 11.92 -11.52 L10.38 -11.20 Q10.22 -10.72 10.74 -10.12 Q10.90 -9.82 10.40 -9.52 L9.88 -9.36 Q10.46 -8.98 10.28 -8.38 Q10.05 -7.95 9.52 -7.62 Q9.98 -7.02 9.88 -6.08 Q9.70 -4.75 8.10 -4.48 C6.25 -4.25 4.72 -4.08 3.92 -3.35 Q3.28 -2.10 3.78 .75 L5.60 4.45',
-    back: 'M-2.2 -31.1 C-6.8 -31.0 -10.5 -28.4 -11.7 -24.1 C-12.35 -21.3 -12.05 -18.0 -11.05 -15.2 C-10.45 -13.4 -10.0 -11.7 -9.85 -10.3 Q-9.15 -10.1 -8.50 -9.45 C-8.42 -7.0 -8.52 -3.6 -9.35 .4 Q-10.0 2.6 -11.5 4.6',
+    front: 'M-2.2 -30.8 C1.8 -31.1 5.7 -29.9 8.2 -27.7 Q9.45 -26.8 9.88 -24.6 Q9.62 -23.5 9.08 -22.55 C9.06 -21.1 9.48 -19.4 10.12 -18.1 Q10.22 -17.55 9.72 -16.85 C10.50 -15.35 11.55 -13.75 12.28 -12.45 Q12.56 -11.92 11.92 -11.52 Q11.10 -11.34 10.38 -11.18 Q10.22 -10.72 10.72 -10.12 Q10.88 -9.82 10.38 -9.52 Q10.02 -9.38 10.20 -9.06 Q10.52 -8.68 10.26 -8.32 Q10.02 -7.92 9.52 -7.62 Q9.96 -7.00 9.86 -6.08 Q9.68 -4.75 8.10 -4.48 C6.25 -4.25 4.72 -4.08 3.92 -3.35 Q3.28 -2.10 3.78 .75 L5.60 4.45',
+    back: 'M-2.2 -30.8 C-6.4 -30.7 -9.9 -28.0 -11.1 -23.7 C-11.75 -20.9 -11.50 -17.7 -10.55 -15.0 C-10.00 -13.2 -9.55 -11.6 -9.40 -10.2 Q-8.75 -10.0 -8.20 -9.35 C-8.12 -6.9 -8.25 -3.6 -9.05 .4 Q-9.7 2.6 -11.2 4.6',
     neck: [1.05, -153.3], tilt: .028, nose: [12.35, -12.15]
   }
 };
@@ -102,26 +102,26 @@ function trouserLeg(g, hipX, hipY, foot, pitch, visitor, near, support=0, light=
   const lifted = Math.min(1, -foot[1]/12);
   const bend = Math.sqrt(Math.max(0, thigh*thigh - along*along)) * (visitor ? .38+.44*lifted-.18*support : .46+.38*lifted);
   const kx = hipX + (dx*along + dy*bend)/reach, ky = hipY + (dy*along - dx*bend)/reach;
-  const knee = visitor ? 6.95 : 7.0, hem = visitor ? 5.60 : 5.70;
+  const knee = visitor ? 6.25 : 6.55, hem = visitor ? 4.90 : 5.15;
   const p = new Path2D();
   if (visitor) {
-    // Clean straight-cut dress trousers with a subtle knee drape and crisp shoe break.
-    p.moveTo(hipX-9.1,hipY-3);
-    p.bezierCurveTo(hipX-10.8,hipY+13,kx-knee-1.1,ky-10,kx-knee,ky-.2);
-    p.bezierCurveTo(kx-knee-.8,ky+11,ankleX-hem-.3,ankleY-9.5,ankleX-hem-.6,ankleY-2.6);
-    p.lineTo(ankleX-hem+.1,ankleY+.4);p.quadraticCurveTo(ankleX+.9,ankleY+1.8,ankleX+hem+1.3,ankleY+1.1);
-    p.quadraticCurveTo(ankleX+hem+1.4,ankleY-.6,ankleX+hem+.4,ankleY-2.8);
-    p.bezierCurveTo(ankleX+hem-.2,ankleY-10.5,kx+knee-.1,ky+11,kx+knee+.1,ky+.8);
-    p.bezierCurveTo(kx+knee+1.2,ky-8.5,hipX+9.6,hipY+11,hipX+8.8,hipY-3);
+    // Tailored straight-taper dress trousers with subtle knee drape and crisp shoe break.
+    p.moveTo(hipX-8.2,hipY-3);
+    p.bezierCurveTo(hipX-9.6,hipY+13,kx-knee-.9,ky-10,kx-knee,ky-.2);
+    p.bezierCurveTo(kx-knee-.6,ky+11,ankleX-hem-.2,ankleY-9.5,ankleX-hem-.4,ankleY-2.6);
+    p.lineTo(ankleX-hem+.1,ankleY+.4);p.quadraticCurveTo(ankleX+.7,ankleY+1.6,ankleX+hem+1.0,ankleY+1.0);
+    p.quadraticCurveTo(ankleX+hem+1.1,ankleY-.6,ankleX+hem+.3,ankleY-2.8);
+    p.bezierCurveTo(ankleX+hem-.1,ankleY-10.5,kx+knee-.1,ky+11,kx+knee+.1,ky+.8);
+    p.bezierCurveTo(kx+knee+1.0,ky-8.5,hipX+8.5,hipY+11,hipX+7.8,hipY-3);
   } else {
-    p.moveTo(hipX-8.7,hipY-1);
-    p.bezierCurveTo(hipX-10.2,hipY+12,kx-knee-1.2,ky-8.3,kx-knee,ky+.6);
-    p.bezierCurveTo(kx-knee-1.25,ky+13,ankleX-hem+.6,ankleY-7,ankleX-hem,ankleY-2.5);
-    p.lineTo(ankleX-hem-.6,ankleY+.75);
-    p.quadraticCurveTo(ankleX,ankleY+2.1,ankleX+hem+.35,ankleY+1.1);
-    p.quadraticCurveTo(ankleX+hem+1.05,ankleY-.25,ankleX+hem-.40,ankleY-2.7);
+    p.moveTo(hipX-8.0,hipY-1);
+    p.bezierCurveTo(hipX-9.3,hipY+12,kx-knee-1.0,ky-8.3,kx-knee,ky+.6);
+    p.bezierCurveTo(kx-knee-1.0,ky+13,ankleX-hem+.5,ankleY-7,ankleX-hem,ankleY-2.5);
+    p.lineTo(ankleX-hem-.4,ankleY+.75);
+    p.quadraticCurveTo(ankleX,ankleY+1.9,ankleX+hem+.35,ankleY+1.0);
+    p.quadraticCurveTo(ankleX+hem+.9,ankleY-.25,ankleX+hem-.35,ankleY-2.7);
     p.bezierCurveTo(ankleX+hem-.05,ankleY-9,kx+knee+.2,ky+13,kx+knee,ky+.75);
-    p.quadraticCurveTo(kx+knee+1.5,ky-6.2,hipX+8.75,hipY-1);
+    p.quadraticCurveTo(kx+knee+1.2,ky-6.2,hipX+7.8,hipY-1);
   }
   p.closePath(); g.fill(p);
   if (near && visitor) reflectedCloth(g,p,'#384647',.12*light);
@@ -130,33 +130,53 @@ function trouserLeg(g, hipX, hipY, foot, pitch, visitor, near, support=0, light=
   g.scale(near ? 1 : 1-.20*flat, 1); g.fill(visitor ? visitorShoe : shoe); g.restore();
 }
 
-function overcoat(g, wind) {
+function overcoat(g, wind, light=0) {
   const p = new Path2D();
-  p.moveTo(-10.8,-160.2);p.lineTo(-4.8,-158.6);p.lineTo(3.7,-157.8);p.lineTo(10.8,-159.8);
-  p.lineTo(12.2,-154.1);p.quadraticCurveTo(17,-151.8,23,-148.2);
-  p.quadraticCurveTo(26,-144.9,24.5,-137.7);p.quadraticCurveTo(19.5,-122.1,17.4,-106.9);
-  p.quadraticCurveTo(20.0,-86.6,25.6,-56);p.quadraticCurveTo(21,-53.6,14.1,-53.0);
-  p.lineTo(8.6,-61.7);p.lineTo(9.5,-52.2);p.quadraticCurveTo(-6.5,-48.5,-17.0,-48.7);
-  p.lineTo(-15.4,-73);p.lineTo(-21.6-wind*.53,-48.3);p.quadraticCurveTo(-30-wind,-48.8,-35.7-wind,-51.4);
-  p.bezierCurveTo(-27-wind*.57,-77.2,-20.7,-93.0,-21.0,-111.0);
-  p.quadraticCurveTo(-23.8,-129.4,-28.2,-140.6);p.quadraticCurveTo(-29,-148.5,-20.2,-151.8);
-  p.lineTo(-12.4,-154.8);p.closePath();
+  // Tailored long noir wool overcoat: clean upturned collar, structured shoulder, waist taper and natural hem slope.
+  p.moveTo(-10.5,-157.5);
+  p.quadraticCurveTo(-4.2,-156.0,2.8,-155.4);
+  p.lineTo(9.4,-156.5);
+  p.lineTo(10.5,-151.8);
+  p.quadraticCurveTo(14.2,-149.2,16.8,-144.6);
+  p.quadraticCurveTo(18.0,-140.2,17.2,-130.8);
+  p.bezierCurveTo(16.4,-121.0,15.3,-111.5,14.8,-102.5);
+  p.bezierCurveTo(15.0,-88.5,16.0,-70.0,17.0+wind*.25,-50.8);
+  p.quadraticCurveTo(9.8,-49.4,1.2,-48.8);
+  p.quadraticCurveTo(-9.5,-48.2,-19.4-wind*1.0,-47.8);
+  p.bezierCurveTo(-18.2-wind*.42,-65.5,-16.5,-84.0,-15.5,-103.0);
+  p.bezierCurveTo(-15.0,-114.5,-16.6,-127.0,-17.6,-138.2);
+  p.quadraticCurveTo(-18.2,-145.2,-14.8,-149.8);
+  p.quadraticCurveTo(-12.4,-152.5,-10.5,-157.5);
+  p.closePath();
   g.fill(p);
+  if (light > 0) {
+    // Subtle directional sheen along the wool drape (clipped inside, no hard wireframe outline).
+    const sheen = new Path2D();
+    sheen.moveTo(-17.4,-138.0);
+    sheen.bezierCurveTo(-16.4,-126.5,-14.9,-114.0,-15.3,-102.8);
+    sheen.bezierCurveTo(-16.3,-84.0,-17.8,-66.0,-19.0-wind*.95,-48.2);
+    sheen.lineTo(-14.2-wind*.65,-48.4);
+    sheen.bezierCurveTo(-13.4,-66.0,-12.2,-84.0,-11.5,-102.8);
+    sheen.bezierCurveTo(-11.2,-114.0,-12.6,-126.5,-13.4,-138.0);
+    sheen.closePath();
+    g.save(); g.clip(p); reflectedCloth(g,sheen,'#3d4f50',.16*light); g.restore();
+  }
+  return p;
 }
 
-// Tailored stand-collar jacket: crisp collar edge, squared shoulder, structured hem above dress trousers.
+// Tailored stand-collar jacket: seamless back collar, poised chest, athletic waist taper, crisp hem above dress trousers.
 const visitorJacket = new Path2D(
-  'M-11.2 -154.6 L-5.4 -153.2 Q-.2 -151.6 6.4 -150.1 L7.4 -148.7 '
-  +'Q11.5 -146.6 15.2 -142.0 Q17.2 -139.0 17.3 -133.2 '
-  +'C17.4 -126.4 16.5 -115.2 15.8 -105.0 L15.5 -91.8 L14.8 -88.2 '
-  +'Q7.0 -87.0 -1.2 -87.3 Q-9.5 -87.5 -15.6 -89.1 '
-  +'L-15.4 -92.6 C-16.2 -101.5 -17.0 -111.5 -18.2 -122.5 '
-  +'C-19.5 -133.0 -19.8 -141.5 -17.6 -147.2 Q-15.6 -150.6 -11.8 -152.0 Z');
-const waistSeat = new Path2D('M-11.6 -8.4 Q0 -11.0 11.4 -8.6 L12.6 2.1 Q10.8 9.8 4.8 12.4 L1.8 13.8 Q-3.6 11.4 -9.4 10.0 Q-13.8 6.8 -13.2 1.6Z');
-const visitorFacing = new Path2D('M-10.4 -153.8 L-5.0 -152.4 Q.2 -150.8 6.5 -149.4 L11.5 -145.8 L10.7 -144.6 L6.0 -148.1 Q.0 -149.6 -5.4 -151.2 L-10.4 -152.6 Z');
-const visitorPocket = new Path2D('M-2.2 -96.4 Q2.6 -99.8 7.2 -103.6 L7.9 -102.9 Q3.3 -98.8 -1.6 -95.4Z');
-const pocketOpening = new Path2D('M-75 -205 H76 V-145 L7.2 -103.6 Q2.6 -99.8 -2.2 -96.4 L-75 -56Z');
-const foldedLapel = new Path2D('M-10.4 -159.2 L-6.2 -157.4 L-7.6 -150.8 L-4.4 -151.4 L-1.2 -136.0 L-6.0 -150.2 L-9.2 -149.4 L-7.8 -156.6Z M-19 -93 Q-19.6 -71.7 -27.5 -53.2 Q-21.8 -74 -19 -93Z');
+  'M-9.2 -152.6 L-4.5 -151.6 Q.4 -150.4 6.4 -149.4 L7.4 -148.0 '
+  +'Q10.8 -146.2 13.4 -141.6 Q14.8 -138.2 14.5 -131.5 '
+  +'C14.3 -123.5 13.6 -113.0 13.0 -103.5 L13.1 -90.2 Q12.9 -88.2 11.4 -88.0 '
+  +'Q4.6 -87.4 -2.2 -87.6 Q-9.4 -87.8 -13.8 -89.0 '
+  +'L-13.8 -92.5 C-13.6 -100.5 -13.3 -108.5 -14.6 -118.5 '
+  +'C-16.0 -129.0 -16.8 -138.8 -15.2 -145.2 Q-13.2 -149.2 -9.2 -152.6 Z');
+const waistSeat = new Path2D('M-10.4 -8.2 Q0 -10.5 10.2 -8.2 L11.2 1.8 Q9.6 8.8 4.4 11.4 L1.6 12.6 Q-3.2 10.4 -8.4 9.2 Q-12.2 6.2 -11.8 1.4Z');
+const visitorFacing = new Path2D('M-8.8 -152.0 L-4.4 -151.0 Q.5 -149.8 6.4 -148.8 L10.6 -145.4 L9.8 -144.3 L5.8 -147.6 Q.3 -148.8 -4.6 -150.0 L-8.8 -151.0 Z');
+const visitorPocket = new Path2D('M-1.8 -95.2 Q2.6 -98.4 7.0 -102.0 L7.6 -101.3 Q3.2 -97.4 -1.2 -94.2Z');
+const pocketOpening = new Path2D('M-75 -205 H76 V-145 L7.0 -102.0 Q2.6 -98.4 -1.8 -95.2 L-75 -56Z');
+const foldedLapel = new Path2D('M-9.2 -156.4 L-5.2 -155.0 L-6.4 -149.0 L-3.4 -149.6 L-.2 -134.8 L-5.0 -148.4 L-8.0 -147.8 L-6.8 -154.0Z M-11.8 -98.2 Q-7.2 -97.0 -2.0 -96.6 L-2.2 -95.7 Q-7.3 -96.0 -12.0 -97.2Z');
 const relaxedHand = new Path2D('M-2.17 -1.12 Q-2.40 .78 -2.70 2.07 Q-3.08 3.55 -2.56 5.07 L-1.06 8.19 Q-.65 8.94 .12 8.63 Q.84 8.75 1.26 8.00 L2.32 5.93 Q2.81 4.95 2.56 3.60 L2.30 2.73 Q3.40 3.26 3.85 2.55 Q4.05 2.09 3.27 1.25 L2.29 -.17 L1.86 -1.48Z');
 
 function sleeve(g, sx, sy, ex, ey, wx, wy, cap, cuff) {
@@ -171,6 +191,7 @@ function sleeve(g, sx, sy, ex, ey, wx, wy, cap, cuff) {
   p.quadraticCurveTo((ex+wx)*.5+vx*(cuff+1.1),(ey+wy)*.5+vy*(cuff+1.1),ex+mx*(elbow+.65),ey+my*(elbow+.65));
   p.quadraticCurveTo(ex+ux*(elbow+.9),ey-5+uy*elbow,sx+ux*cap,sy+uy*cap);
   p.quadraticCurveTo(sx,sy-cap*1.31,sx-ux*cap,sy-uy*cap); p.closePath(); g.fill(p);
+  return p;
 }
 
 function reflectedCloth(g, path, shade, light) {
@@ -182,27 +203,27 @@ function visitorArm(g, near, pose, light) {
   const direction = near ? 1 : -1;
   const phase = direction*(pose.swing ?? 0), trail = direction*(pose.armTrail ?? pose.swing ?? 0);
   const pocket = near ? (pose.pocket ?? 0) : 0, turn = pose.turn ?? 1;
-  const sx = (near ? -6.0-2.4*turn : 3.2+1.6*turn) + 1.15*phase;
-  const sy = (near ? -143.0+1.0*pocket : -141.5) + .40*phase;
+  const sx = (near ? -5.0-1.6*turn : 2.8+1.2*turn) + 1.15*phase;
+  const sy = (near ? -142.2+.6*pocket : -141.0) + .40*phase;
   const relaxed = pose.restWeight ?? 0;
-  const hangUpper = (near ? -.09 : -.05) + .25*phase;
-  const hangLower = (near ? .24 : .14-.08*relaxed) + .30*trail + .08*Math.max(0,phase);
-  const upper = hangUpper+(-.27-hangUpper)*pocket;
-  const lower = hangLower+(.84-hangLower)*pocket;
+  const hangUpper = (near ? -.07 : -.04) + .24*phase;
+  const hangLower = (near ? .22 : .13-.07*relaxed) + .29*trail + .08*Math.max(0,phase);
+  const upper = hangUpper+(-.18-hangUpper)*pocket;
+  const lower = hangLower+(.72-hangLower)*pocket;
   const ax=Math.sin(upper), ay=Math.cos(upper), bx=Math.sin(lower), by=Math.cos(lower);
-  const ex=sx+26.8*ax, ey=sy+26.8*ay, wx=ex+23.8*bx, wy=ey+23.8*by;
-  const nx=(ay+by)*.5, ny=-(ax+bx)*.5, cuff=near?4.15:3.70, cap=near?6.5:5.4;
+  const ex=sx+25.5*ax, ey=sy+25.5*ay, wx=ex+23.0*bx, wy=ey+23.0*by;
+  const nx=(ay+by)*.5, ny=-(ax+bx)*.5, cuff=near?3.85:3.45, cap=near?5.8:4.9;
   const p=new Path2D();
   p.moveTo(sx-cap*ay,sy+cap*ax-.4);
-  p.bezierCurveTo(sx-(cap+1.8)*ay+5*ax,sy+(cap+1.8)*ax+5*ay,ex-6.4*ay-7*ax,ey+6.4*ax-7*ay,
-    ex-6.2*nx-.8*ax,ey-6.2*ny-.8*ay);
-  p.quadraticCurveTo(ex-6.4*nx+2.2*bx,ey-6.4*ny+2.2*by,ex-5.6*by+5.0*bx,ey+5.6*bx+5.0*by);
-  p.quadraticCurveTo(wx-5.0*by-5.5*bx,wy+5.0*bx-5.5*by,wx-cuff*by-.5*bx,wy+cuff*bx-.5*by);
+  p.bezierCurveTo(sx-(cap+1.4)*ay+5*ax,sy+(cap+1.4)*ax+5*ay,ex-5.4*ay-6.5*ax,ey+5.4*ax-6.5*ay,
+    ex-5.2*nx-.6*ax,ey-5.2*ny-.6*ay);
+  p.quadraticCurveTo(ex-5.4*nx+2.2*bx,ey-5.4*ny+2.2*by,ex-5.0*by+5.0*bx,ey+5.0*bx+5.0*by);
+  p.quadraticCurveTo(wx-4.6*by-5.5*bx,wy+4.6*bx-5.5*by,wx-cuff*by-.5*bx,wy+cuff*bx-.5*by);
   p.lineTo(wx-(cuff-.4)*by+.6*bx,wy+(cuff-.4)*bx+.6*by);
   p.quadraticCurveTo(wx+.25*bx,wy+.25*by,wx+cuff*by+.25*bx,wy-cuff*bx+.25*by);
-  p.quadraticCurveTo(wx+(cuff+1.4)*by-8.0*bx,wy-(cuff+1.4)*bx-8.0*by,ex+5.3*nx+2.0*bx,ey+5.3*ny+2.0*by);
-  p.quadraticCurveTo(ex+5.8*ay,ey-5.8*ax-3.6,sx+(cap-.3)*ay+4.0*ax,sy-(cap-.3)*ax+4.0*ay);
-  p.bezierCurveTo(sx+cap*ay,sy-4.4,sx-3.2*ay,sy-(near?6.2:5.2),sx-cap*ay,sy+cap*ax-.4);
+  p.quadraticCurveTo(wx+(cuff+1.2)*by-7.5*bx,wy-(cuff+1.2)*bx-7.5*by,ex+4.8*nx+2.0*bx,ey+4.8*ny+2.0*by);
+  p.quadraticCurveTo(ex+5.2*ay,ey-5.2*ax-3.4,sx+(cap-.3)*ay+4.0*ax,sy-(cap-.3)*ax+4.0*ay);
+  p.bezierCurveTo(sx+cap*ay,sy-4.2,sx-3.0*ay,sy-(near?5.8:4.9),sx-cap*ay,sy+cap*ax-.4);
   p.closePath();
   g.save();
   if(pocket>0){
@@ -214,12 +235,12 @@ function visitorArm(g, near, pose, light) {
   g.fill(p);
   if (near && light>0) {
     const fold=new Path2D();
-    fold.moveTo(sx-5.4*ay+6*ax,sy+5.4*ax+6*ay);
-    fold.quadraticCurveTo(ex-6.8*ay-6*ax,ey+6.8*ax-6*ay,ex-5.7*nx,ey-5.7*ny);
-    fold.quadraticCurveTo(ex-5.3*by+6*bx,ey+5.3*bx+6*by,wx-3.6*by,wy+3.6*bx);
-    fold.quadraticCurveTo(ex-3.2*by+5*bx,ey+3.2*bx+5*by,ex-3.5*nx,ey-3.5*ny);
-    fold.quadraticCurveTo(ex-5.1*ay-7*ax,ey+5.1*ax-7*ay,sx-5.4*ay+6*ax,sy+5.4*ax+6*ay);
-    g.save();g.clip(p);reflectedCloth(g,fold,'#445453',light*.18);g.restore();
+    fold.moveTo(sx-4.8*ay+6*ax,sy+4.8*ax+6*ay);
+    fold.quadraticCurveTo(ex-5.8*ay-6*ax,ey+5.8*ax-6*ay,ex-4.8*nx,ey-4.8*ny);
+    fold.quadraticCurveTo(ex-4.6*by+6*bx,ey+4.6*bx+6*by,wx-3.3*by,wy+3.3*bx);
+    fold.quadraticCurveTo(ex-2.8*by+5*bx,ey+2.8*bx+5*by,ex-3.0*nx,ey-3.0*ny);
+    fold.quadraticCurveTo(ex-4.3*ay-7*ax,ey+4.3*ax-7*ay,sx-4.8*ay+6*ax,sy+4.8*ax+6*ay);
+    g.save();g.clip(p);reflectedCloth(g,fold,'#445453',light*.20);g.restore();
   }
 }
 
@@ -237,11 +258,11 @@ export function drawFigure(g,kind,x,footY,scale,facing,pose,t,ink,clothLight=0) 
   const hipY = visitor ? visitorHipY(pose) : -94-(pose.rise??0)+1.65*(pose.settle??0);
   const pitch = visitor ? (pose.torsoPitch ?? 0) : .70*(pose.shoulder ?? 0);
   g.save(); g.translate(x,footY); g.scale(facing*scale,scale); g.fillStyle=ink;
-  trouserLeg(g,hips-(visitor?4.6:6.35),hipY+.15+1.15*weight,a,pose.aPitch ?? 0,visitor,false);
+  trouserLeg(g,hips-(visitor?4.4:5.8),hipY+.15+1.15*weight,a,pose.aPitch ?? 0,visitor,false);
   if (visitor) {
     g.save();g.translate(hips,hipY);g.fill(waistSeat);g.restore();
   }
-  trouserLeg(g,hips+(visitor?3.45:6.15),hipY-.5-.55*weight,b,pose.bPitch ?? 0,visitor,true,weight,clothLight);
+  trouserLeg(g,hips+(visitor?3.25:5.6),hipY-.5-.55*weight,b,pose.bPitch ?? 0,visitor,true,weight,clothLight);
   g.translate(hips,hipY);
   if (!visitor) g.transform(1-.045*(pose.weight ?? 0),0,-.012+.72*(pose.lean ?? 0),1,0,0);
   g.rotate(pitch); g.translate(0,hipHeight-.70*breath);
@@ -252,18 +273,29 @@ export function drawFigure(g,kind,x,footY,scale,facing,pose,t,ink,clothLight=0) 
     reflectedCloth(g,visitorPocket,'#455350',.30*clothLight);
     visitorArm(g,true,pose,clothLight);
   } else {
-    sleeve(g,-17,-142,-22.4-3.6*swing,-118,-16.2-4.8*swing,-99,7.6,4.2);
-    overcoat(g,(pose.hem ?? 0)*.76);
-    reflectedCloth(g,foldedLapel,'#3b4b4b',.34*clothLight);
-    const free = pose.release ?? 0;
-    sleeve(g,17,-143,27.8+free,-118,12.1,-110.1+free,7.8,5);
+    sleeve(g,4.0,-141.5,7.8+3.2*swing,-116,9.5+4.4*swing,-96,5.0,3.5);
+    overcoat(g,(pose.hem ?? 0)*.76,clothLight);
+    reflectedCloth(g,foldedLapel,'#3e4f4f',.32*clothLight);
+    const nearArm = sleeve(g,-7.8,-141.5,-13.6-3.2*swing,-114.5,-1.2-4.4*swing,-96.2,6.0,4.0);
+    if (clothLight > 0) {
+      const crease = new Path2D();
+      crease.moveTo(-12.5,-136.5);
+      crease.quadraticCurveTo(-18.6-3.2*swing,-116.5,-17.8-3.2*swing,-114.0);
+      crease.quadraticCurveTo(-12.2-3.6*swing,-105.0,-4.5-4.4*swing,-95.5);
+      crease.lineTo(-1.8-4.4*swing,-97.2);
+      crease.quadraticCurveTo(-9.6-3.6*swing,-106.5,-14.6-3.2*swing,-114.5);
+      crease.quadraticCurveTo(-15.0-3.2*swing,-117.0,-9.8,-136.5);
+      crease.closePath();
+      g.save(); g.clip(nearArm); reflectedCloth(g,crease,'#445554',.22*clothLight); g.restore();
+    }
   }
   g.restore();
   const yaw = visitor ? .53+.47*(pose.glance ?? turn) : .98*(2*(pose.glance ?? 1)-1);
   const index = Math.round((1+Math.max(-1,Math.min(1,yaw)))*turnSteps/2);
   g.translate(...model.neck);
   const tilt = visitor ? (pose.nod ?? 0)-.72*pitch : .85*(pose.nod ?? 0)+.037*(1-turn);
-  g.rotate(model.tilt+tilt); g.fill(faceAt(model,index));
+  g.rotate(model.tilt+tilt);
+  g.fill(faceAt(model,index));
   if (!visitor) g.fill(fedoraViews[index]);
   g.restore();
 }

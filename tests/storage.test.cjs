@@ -766,3 +766,37 @@ test('随机揭晓每一步只公开对应号码，服务端恢复进度后大�
   }
   assert.equal(store.getUnpublishedLotteryResult(), null);
 });
+
+test('一等奖逐席开奖每步只公开已揭晓席位，刷新和重试保留进度且投影不泄漏未揭晓号码', () => {
+  const directory = fixture();
+  const store = new DataStore();
+  const config = { minNumber: 1, maxNumber: 20, count: 3, title: '一等奖' };
+  const drawn = store.drawLottery('first-step', config, 'first', 1);
+  assert.equal(drawn.numbers.length, 3);
+  assert.equal(drawn.revealedCount, 1);
+  assert.deepEqual(store.drawLottery('first-step', config, 'first', 1), drawn);
+  assert.deepEqual(store.getAllLotteryResults()[0].numbers, drawn.numbers.slice(0, 1));
+  assert.equal(store.getStageAwards().first.revealedCount, 1);
+
+  const rollingSecond = buildStageView({
+    ...initialStage, scene: 10, rolling: true, result: drawn, revealed: 1,
+    revealOrder: [0, 1, 2], usedNumbers: drawn.numbers,
+  }, config, null);
+  assert.deepEqual(rollingSecond.slots, [drawn.numbers[0], null, null]);
+  assert.equal(rollingSecond.activeSlot, 1);
+  assert.equal(rollingSecond.phase, 'rolling');
+  assert.equal(rollingSecond.excluded.includes(drawn.numbers[1]), false);
+  assert.equal(rollingSecond.excluded.includes(drawn.numbers[2]), false);
+
+  store.revealLotteryResult('first-step', 2);
+  getDatabase().close();
+  globalThis.lveyingDatabases.delete(path.join(directory, 'lveying.sqlite'));
+  const reopened = new DataStore();
+  assert.equal(reopened.getStageAwards().first.revealedCount, 2);
+  assert.deepEqual(reopened.getAllLotteryResults()[0].numbers, drawn.numbers.slice(0, 2));
+
+  reopened.revealLotteryResult('first-step', 3);
+  assert.equal(reopened.getStageAwards().first.revealedCount, undefined);
+  assert.deepEqual(reopened.getAllLotteryResults()[0].numbers, drawn.numbers);
+  assert.equal(reopened.getUnpublishedLotteryResult(), null);
+});
