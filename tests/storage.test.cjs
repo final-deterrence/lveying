@@ -25,6 +25,7 @@ const files = [
   'app/api/danmaku/route.ts', 'app/api/danmaku/public/route.ts', 'app/api/danmaku/censored/route.ts',
   'app/api/danmaku/export/route.ts',
   'lib/homepageLinks.ts', 'app/api/admin/homepage/route.ts',
+  'app/api/programs/route.ts', 'app/api/programs/add/route.ts', 'app/api/admin/programs/publication/route.ts',
 ];
 for (const file of files) {
   const source = fs.readFileSync(path.join(root, file), 'utf8')
@@ -41,7 +42,7 @@ const { DataStore } = require(path.join(compiled, 'lib/dataStore.js'));
 const { UserManager } = require(path.join(compiled, 'lib/userManager.js'));
 const { defaultData } = require(path.join(compiled, 'lib/defaultData.js'));
 const { submitDanmaku, getDanmakuClientIp, getDanmakuClientId, DANMAKU_CLIENT_COOKIE } = require(path.join(compiled, 'lib/danmakuGuard.js'));
-const { getDanmakuSettings, saveDanmakuSettings, reviewDanmaku, getDanmakuGuardStats, validateDanmakuSettings } = require(path.join(compiled, 'lib/danmakuPolicy.js'));
+const { getDanmakuSettings, saveDanmakuSettings, reviewDanmaku, getDanmakuGuardStats, validateDanmakuSettings, setDanmakuSubmissionOpen } = require(path.join(compiled, 'lib/danmakuPolicy.js'));
 const { canonicalIp } = require(path.join(compiled, 'lib/ip.js'));
 const { buildStageView, createRevealOrder, restoreRevealOrder, initialStage, formatNumber } = require(path.join(compiled, 'lib/lotteryStage.js'));
 
@@ -155,6 +156,53 @@ test('节目和抽奖局部写入不覆盖弹幕；事务失败不清空原节�
   assert.equal(store.deleteLotteryResult(result.id), true);
 });
 
+test('节目单默认隐藏，管理员保存草稿后可发布和撤回，发布状态跨重启保留', async () => {
+  const directory = fixture(structuredClone(defaultData));
+  const { GET } = require(path.join(compiled, 'app/api/programs/route.js'));
+  const { POST } = require(path.join(compiled, 'app/api/programs/add/route.js'));
+  const { PUT } = require(path.join(compiled, 'app/api/admin/programs/publication/route.js'));
+  const { generateToken } = require(path.join(compiled, 'lib/auth.js'));
+  const programsUrl = 'http://localhost/api/programs';
+  const headersFor = role => ({ Authorization: `Bearer ${generateToken({ username: role, role })}`, 'Content-Type': 'application/json' });
+  const adminHeaders = headersFor('admin');
+  const read = headers => GET(new Request(programsUrl, { headers }));
+  const write = (url, method, body, headers) => new Request(url, { method, headers, body: JSON.stringify(body) });
+  const publish = (body, headers = adminHeaders) => PUT(write('http://localhost/api/admin/programs/publication', 'PUT', body, headers));
+
+  const store = new DataStore();
+  const draft = await (await read(adminHeaders)).json();
+  assert.equal(draft.published, false);
+  assert.equal(draft.programs.length, 5);
+
+  const added = await POST(write(`${programsUrl}/add`, 'POST', { title: '未公布的节目', order: 0 }, adminHeaders));
+  assert.equal(added.status, 200);
+  const { program } = await added.json();
+  assert.equal((await (await read(adminHeaders)).json()).programs[0].id, program.id);
+  const publicResponse = await read();
+  assert.equal(publicResponse.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await publicResponse.json(), { programs: [] });
+  assert.deepEqual(await (await read(headersFor('audience'))).json(), { programs: [] });
+  assert.deepEqual(store.getHierarchicalPrograms(true), []);
+  assert.equal((await publish({ published: true }, {})).status, 401);
+  assert.equal((await publish({ published: true }, headersFor('audience'))).status, 401);
+  assert.equal((await publish({ published: 'true' })).status, 400);
+
+  assert.deepEqual(await (await publish({ published: true })).json(), { published: true });
+  assert.equal((await (await read()).json()).programs[0].id, program.id);
+  store.updateProgramStatus(program.id, true);
+  getDatabase().close();
+  globalThis.lveyingDatabases.delete(path.join(directory, 'lveying.sqlite'));
+  assert.equal((await (await read(adminHeaders)).json()).published, true);
+  assert.equal((await (await read()).json()).programs[0].completed, true);
+
+  assert.deepEqual(await (await publish({ published: false })).json(), { published: false });
+  assert.deepEqual(await (await read()).json(), { programs: [] });
+  assert.equal((await (await read(adminHeaders)).json()).programs.length, 6);
+  store.updatePrograms([]);
+  assert.equal((await publish({ published: true })).status, 400);
+  assert.equal(store.isProgramSchedulePublished(), false);
+});
+
 test('十万条历史记录时公开查询命中索引且只返回 20 条；导出分批且有结束边界', t => {
   fixture();
   const db = getDatabase();
@@ -198,6 +246,7 @@ test('多个进程并发写入，消息不丢失且 ID 不重复', async () => {
 
 test('API 分页校验、鉴权、公开脱敏及增删审核流程', async () => {
   fixture();
+  setDanmakuSubmissionOpen(true);
   const api = require(path.join(compiled, 'app/api/danmaku/route.js'));
   const publicApi = require(path.join(compiled, 'app/api/danmaku/public/route.js'));
   const screenApi = require(path.join(compiled, 'app/api/danmaku/censored/route.js'));
@@ -228,6 +277,51 @@ test('API 分页校验、鉴权、公开脱敏及增删审核流程', async () =
   assert.equal(rejected.stats.pending, 0);
   await api.DELETE(new Request(url, { method: 'DELETE', headers, body: '{}' }));
   assert.deepEqual((await (await screenApi.GET()).json()).danmakus, []);
+});
+
+test('弹幕发送默认关闭，仅管理员可开放和暂停，设置跨重启保留', async () => {
+  const directory = fixture(structuredClone(defaultData));
+  const api = require(path.join(compiled, 'app/api/danmaku/route.js'));
+  const publicApi = require(path.join(compiled, 'app/api/danmaku/public/route.js'));
+  const { generateToken } = require(path.join(compiled, 'lib/auth.js'));
+  const url = 'http://localhost/api/danmaku';
+  const admin = { Authorization: `Bearer ${generateToken({ role: 'admin' })}` };
+  const guest = { Authorization: `Bearer ${generateToken({ role: 'guest' })}` };
+  const change = (submissionOpen, headers) => api.PUT(new Request(url, {
+    method: 'PUT', headers, body: JSON.stringify({ submissionOpen }),
+  }));
+  const send = (headers = {}) => api.POST(new Request(url, {
+    method: 'POST', headers: { 'X-Real-IP': '1.2.3.4', ...headers },
+    body: JSON.stringify({ content: '加油' }),
+  }));
+
+  assert.equal((await (await publicApi.GET()).json()).submissionOpen, false);
+  assert.equal((await change(true)).status, 401);
+  assert.equal((await change(true, guest)).status, 401);
+  assert.equal((await change('true', admin)).status, 400);
+  for (const headers of [{}, admin]) {
+    const response = await send(headers);
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).submissionOpen, false);
+  }
+  assert.deepEqual(submitDanmaku('加油', '1.2.3.4', 'closed-client'), { ok: false, reason: 'closed' });
+  const store = new DataStore();
+  assert.equal(store.getDanmakus().stats.total, 0);
+  assert.equal(getDatabase().prepare('SELECT COUNT(*) AS total FROM danmaku_rate_events').get().total, 0);
+
+  assert.deepEqual(await (await change(true, admin)).json(), { submissionOpen: true });
+  getDatabase().close();
+  globalThis.lveyingDatabases.delete(path.join(directory, 'lveying.sqlite'));
+  assert.equal((await (await publicApi.GET()).json()).submissionOpen, true);
+  assert.deepEqual(await (await send()).json(), { success: true });
+  assert.equal(store.getPublicDanmakus().length, 1);
+
+  assert.deepEqual(await (await change(false, admin)).json(), { submissionOpen: false });
+  assert.equal((await send()).status, 403);
+  const publicResponse = await (await publicApi.GET()).json();
+  assert.equal(publicResponse.submissionOpen, false);
+  assert.equal(publicResponse.danmakus.length, 1);
+  assert.equal(store.getDanmakus().stats.total, 1);
 });
 
 test('在线备份包含 WAL 内最新写入，可恢复数据库', () => {
@@ -261,6 +355,7 @@ test('自动审核只完整匹配允许短句，禁用词优先，未知内容�
 
 test('自动通过、拦截和待审独立统计；原因仅后台返回；人工可以覆盖与撤回', () => {
   fixture();
+  setDanmakuSubmissionOpen(true);
   const store = new DataStore();
   const settings = getDanmakuSettings();
   const now = Date.now();
@@ -288,6 +383,7 @@ test('自动通过、拦截和待审独立统计；原因仅后台返回；人�
 
 test('同一浏览器间隔 5 秒、滚动一分钟最多 10 条；清空弹幕不重置限流', () => {
   fixture();
+  setDanmakuSubmissionOpen(true);
   const settings = getDanmakuSettings();
   const now = Date.now();
   assert.equal(submitDanmaku('第一条', '1.2.3.4', 'client', settings, now).ok, true);
@@ -305,6 +401,7 @@ test('同一浏览器间隔 5 秒、滚动一分钟最多 10 条；清空弹幕�
 
 test('多人共用 IP 可分别发送，换浏览器不能绕过 IP 限制；IPv6 /64 及映射写法归一', () => {
   fixture();
+  setDanmakuSubmissionOpen(true);
   const settings = getDanmakuSettings();
   settings.rateLimit.ipPerMinute = 2;
   const now = Date.now();
@@ -321,6 +418,7 @@ test('多人共用 IP 可分别发送，换浏览器不能绕过 IP 限制；IPv
 
 test('同一浏览器重复内容一分钟内过滤；别人的同样加油不受影响；限流记录跨重启保留', () => {
   const directory = fixture();
+  setDanmakuSubmissionOpen(true);
   const settings = getDanmakuSettings();
   const now = Date.now();
   assert.equal(submitDanmaku('HELLO  world', '1.2.3.4', 'a', settings, now).ok, true);
@@ -334,6 +432,7 @@ test('同一浏览器重复内容一分钟内过滤；别人的同样加油不�
 
 test('服务端事务失败时限流计数、弹幕和审核记录一起回滚', () => {
   fixture();
+  setDanmakuSubmissionOpen(true);
   const db = getDatabase();
   db.exec("CREATE TRIGGER fail_review BEFORE INSERT ON danmaku_reviews BEGIN SELECT RAISE(ABORT, 'review failure'); END;");
   assert.throws(() => submitDanmaku('加油', '1.2.3.4', 'same-client'), /review failure/);
@@ -346,6 +445,7 @@ test('服务端事务失败时限流计数、弹幕和审核记录一起回滚',
 
 test('有效提交统一成功，不泄漏限流或审核结果；拦截计数只有管理员可见', async () => {
   fixture();
+  setDanmakuSubmissionOpen(true);
   const api = require(path.join(compiled, 'app/api/danmaku/route.js'));
   const url = 'https://festival.example/api/danmaku';
   let cookie = '';
@@ -377,6 +477,7 @@ test('有效提交统一成功，不泄漏限流或审核结果；拦截计数�
 
 test('入口 IP 校验忽略伪造 X-Forwarded-For，生产环境缺失真实 IP 时拒绝提交', async t => {
   fixture();
+  setDanmakuSubmissionOpen(true);
   const original = process.env.NODE_ENV;
   t.after(() => { if (original === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = original; });
   process.env.NODE_ENV = 'production';
@@ -399,6 +500,7 @@ test('入口 IP 校验忽略伪造 X-Forwarded-For，生产环境缺失真实 IP
 
 test('弹幕接口检查 JSON 和实际请求体大小，超大流式请求不写入数据库', async () => {
   fixture();
+  setDanmakuSubmissionOpen(true);
   const api = require(path.join(compiled, 'app/api/danmaku/route.js'));
   const url = 'http://localhost/api/danmaku';
   for (const body of ['{', 'null', '[]', JSON.stringify({ content: 12 }), JSON.stringify({ content: '  ' }), JSON.stringify({ content: '字'.repeat(41) })]) {
@@ -413,6 +515,7 @@ test('弹幕接口检查 JSON 和实际请求体大小，超大流式请求不�
 
 test('后台规则接口鉴权、校验、试审不发布；保存即时生效，旧审核状态保留', async () => {
   fixture();
+  setDanmakuSubmissionOpen(true);
   const api = require(path.join(compiled, 'app/api/admin/danmaku-settings/route.js'));
   const { generateToken } = require(path.join(compiled, 'lib/auth.js'));
   const url = 'http://localhost/api/admin/danmaku-settings';
@@ -449,6 +552,7 @@ test('后台规则接口鉴权、校验、试审不发布；保存即时生效�
 
 test('多个进程同时提交时 IP 配额不可超卖，自动审核与限流统计保持一致', async () => {
   const directory = fixture();
+  setDanmakuSubmissionOpen(true);
   const settings = getDanmakuSettings();
   settings.rateLimit.ipPerMinute = 7;
   saveDanmakuSettings(settings);
@@ -478,6 +582,8 @@ test('已迁移的 SQLite 自动补充审核和限流表，不重新导入 JSON 
   const upgraded = getDatabase();
   assert.equal(store.getPublicDanmakus()[0].id, old.id);
   assert.equal(upgraded.prepare('SELECT COUNT(*) AS n FROM danmaku_reviews').get().n, 0);
+  assert.deepEqual(submitDanmaku('加油', '1.2.3.4', 'after-upgrade'), { ok: false, reason: 'closed' });
+  setDanmakuSubmissionOpen(true);
   assert.equal(submitDanmaku('加油', '1.2.3.4', 'after-upgrade').ok, true);
   assert.equal(store.getDanmakus().stats.approved, 2);
 });

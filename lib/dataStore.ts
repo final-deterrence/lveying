@@ -60,16 +60,31 @@ export class DataStore {
   constructor(private readonly connection?: DatabaseSync) {}
   private get db(): DatabaseSync { return this.connection ?? getDatabase(); }
 
-  getPrograms(): Program[] {
-    return this.db.prepare('SELECT * FROM programs ORDER BY order_value, parent_id IS NOT NULL, sub_order, rowid')
-      .all().map(programFromRow);
+  getPrograms(publicOnly = false): Program[] {
+    return this.db.prepare(`SELECT * FROM programs
+      WHERE ? = 0 OR EXISTS (SELECT 1 FROM settings WHERE key = 'programs_published' AND value = 'true')
+      ORDER BY order_value, parent_id IS NOT NULL, sub_order, rowid`)
+      .all(Number(publicOnly)).map(programFromRow);
   }
 
-  getHierarchicalPrograms(): Program[] {
-    const programs = this.getPrograms();
+  getHierarchicalPrograms(publicOnly = false): Program[] {
+    const programs = this.getPrograms(publicOnly);
     return programs.filter(p => !p.parentId).flatMap(parent => [
       parent, ...programs.filter(p => p.parentId === parent.id).sort((a, b) => (a.subOrder || 0) - (b.subOrder || 0)),
     ]);
+  }
+
+  isProgramSchedulePublished(): boolean {
+    return this.db.prepare("SELECT value FROM settings WHERE key = 'programs_published'").get()?.value === 'true';
+  }
+
+  setProgramSchedulePublished(published: boolean): boolean {
+    const result = this.db.prepare(`INSERT INTO settings (key, value)
+      SELECT 'programs_published', ?
+      WHERE ? = 0 OR EXISTS (SELECT 1 FROM programs WHERE COALESCE(parent_id, '') = '' AND TRIM(title) <> '')
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .run(JSON.stringify(published), Number(published));
+    return result.changes > 0;
   }
 
   updatePrograms(programs: Program[]): void {

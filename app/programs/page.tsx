@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Program } from '@/types';
 import ProgramPerformersDisplay from '@/components/ProgramPerformersDisplay';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
@@ -9,15 +9,19 @@ import GuestNavBar from '@/components/GuestNavBar';
 export default function ProgramsPage() {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const fetchPrograms = async () => {
     try {
-      const response = await fetch('/api/programs');
+      const response = await fetch('/api/programs', { cache: 'no-store' });
+      if (!response.ok) throw new Error('获取节目单失败');
       const data = await response.json();
       setPrograms(data.programs);
+      setLoadError(false);
     } catch (error) {
       console.error('获取节目单失败:', error);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -99,6 +103,10 @@ export default function ProgramsPage() {
               <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-green-500 border-t-transparent"></div>
               <p className="mt-4 text-gray-800 font-semibold drop-shadow-md">加载中...</p>
             </div>
+          ) : loadError ? (
+            <p role="alert" className="py-6 text-center text-gray-700">节目单加载失败，请稍后再试。</p>
+          ) : programs.length === 0 ? (
+            <p className="py-6 text-center text-gray-700">敬请期待</p>
           ) : (
             <div className="space-y-3">
               {programs.map((program, index) => {

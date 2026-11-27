@@ -11,6 +11,10 @@ export default function AdminProgramsPage() {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [published, setPublished] = useState(false);
+  const [savingPublication, setSavingPublication] = useState(false);
+  const [publicationError, setPublicationError] = useState('');
   
   // 编辑状态
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -38,18 +42,57 @@ export default function AdminProgramsPage() {
       router.push('/admin');
       return;
     }
+    async function fetchPrograms() {
+      try {
+        const response = await fetch('/api/programs', {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error('获取节目单失败');
+        const data = await response.json();
+        if (typeof data.published !== 'boolean') {
+          router.replace('/admin');
+          return;
+        }
+        setPrograms(data.programs);
+        setPublished(data.published);
+      } catch (error) {
+        console.error('获取节目单失败:', error);
+        setLoadError(true);
+      } finally {
+        setLoading(false);
+      }
+    }
+
     fetchPrograms();
   }, [router]);
 
-  const fetchPrograms = async () => {
+  const updatePublication = async () => {
+    const token = localStorage.getItem('adminToken');
+    if (!token) {
+      router.replace('/admin');
+      return;
+    }
+
+    setSavingPublication(true);
+    setPublicationError('');
     try {
-      const response = await fetch('/api/programs');
+      const response = await fetch('/api/admin/programs/publication', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ published: !published }),
+      });
       const data = await response.json();
-      setPrograms(data.programs);
+      if (!response.ok) {
+        setPublicationError(data.error || '更新发布状态失败，请重试');
+        return;
+      }
+      setPublished(data.published);
     } catch (error) {
-      console.error('获取节目单失败:', error);
+      console.error('更新节目单发布状态失败:', error);
+      setPublicationError('更新发布状态失败，请重试');
     } finally {
-      setLoading(false);
+      setSavingPublication(false);
     }
   };
 
@@ -312,6 +355,32 @@ export default function AdminProgramsPage() {
               返回管理面板
             </button>
           </div>
+
+          {loadError ? (
+            <p role="alert" className="mt-4 rounded-xl bg-white p-4 text-red-700">节目单加载失败，请刷新重试。</p>
+          ) : (
+            <section aria-labelledby="program-publication" className="mt-4 rounded-xl bg-white p-4 shadow-lg sm:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 id="program-publication" className="text-lg font-semibold text-gray-800">节目单发布</h2>
+                  <p role="status" className="mt-1 text-sm text-gray-600">
+                    {published ? '已发布，观众可以查看节目单。' : '未发布，观众页面显示「敬请期待」。'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={updatePublication}
+                  disabled={savingPublication || saving || (!published && !programs.some(program => !program.parentId))}
+                  className={`rounded-lg px-4 py-2 font-medium text-white disabled:opacity-50 ${
+                    published ? 'bg-gray-600 hover:bg-gray-700' : 'bg-[#743a43] hover:bg-[#633139]'
+                  }`}
+                >
+                  {savingPublication ? '提交中…' : published ? '撤回节目单' : '发布节目单'}
+                </button>
+              </div>
+              {publicationError && <p role="alert" className="mt-2 text-sm text-red-700">{publicationError}</p>}
+            </section>
+          )}
           
           <div className="mt-4 bg-white rounded-xl shadow-lg p-6">
             <div className="flex justify-between items-center mb-4">

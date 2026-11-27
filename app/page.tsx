@@ -1,6 +1,9 @@
 import Image from 'next/image';
+import Link from 'next/link';
 import GuestNavBar from '@/components/GuestNavBar';
 import FestivalEasterEgg from '@/components/FestivalEasterEgg';
+import MarkdownRenderer from '@/components/MarkdownRenderer';
+import { dataStore } from '@/lib/dataStore';
 import { getBilibiliVideo, getHomepageLinks } from '@/lib/homepageLinks';
 
 export const dynamic = 'force-dynamic';
@@ -8,6 +11,7 @@ export const dynamic = 'force-dynamic';
 export default function Home() {
   const { videoUrl, articles } = getHomepageLinks();
   const video = getBilibiliVideo(videoUrl);
+  const programs = dataStore.getHierarchicalPrograms(true);
 
   return (
     <div className="festival-backdrop min-h-screen text-gray-800">
@@ -28,6 +32,26 @@ export default function Home() {
           <p className="border-t border-black/20 pt-4 leading-7 text-gray-700">
             一起欣赏同学们的原创节目，参与现场弹幕互动，揭晓今晚的幸运号码。
           </p>
+
+          <section className="border-t border-black/20 pt-4" aria-labelledby="festival-programs">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 id="festival-programs" className="text-lg font-bold">节目单</h2>
+              {programs.length > 0 && (
+                <Link href="/programs" className="text-[#743a43] underline">查看节目详情</Link>
+              )}
+            </div>
+            {programs.length > 0 ? (
+              <ol className="mt-2 divide-y divide-black/10">
+                {programs.map(program => (
+                  <li key={program.id} className={`py-1.5 ${program.parentId ? 'pl-5' : 'font-medium'}`}>
+                    <MarkdownRenderer content={program.title} />
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="mt-2 text-gray-700">敬请期待</p>
+            )}
+          </section>
 
           {video && (
             <section className="border-t border-black/20 pt-4" aria-labelledby="festival-trailer">

@@ -3,7 +3,7 @@ import { isIP } from 'node:net';
 import type { Danmaku, DanmakuSettings } from '../types';
 import { getDatabase, insertDanmaku, transaction } from './database';
 import { canonicalIp } from './ip';
-import { getDanmakuSettings, guardDay, reviewDanmaku } from './danmakuPolicy';
+import { getDanmakuSettings, guardDay, isDanmakuSubmissionOpen, reviewDanmaku } from './danmakuPolicy';
 
 export const DANMAKU_CLIENT_COOKIE = 'lveying_danmaku_client';
 export const MAX_DANMAKU_BODY_BYTES = 4096;
@@ -36,7 +36,7 @@ export function getDanmakuClientId(request: Request): string {
 
 type Submission =
   | { ok: true; danmaku: Danmaku }
-  | { ok: false; reason: 'banned' }
+  | { ok: false; reason: 'banned' | 'closed' }
   | { ok: false; reason: 'rate_limit' | 'duplicate'; retryAfter: number };
 
 export function submitDanmaku(
@@ -51,8 +51,9 @@ export function submitDanmaku(
   const contentHash = createHash('sha256').update(normalizedContent).digest('hex');
   const ipKey = ipRateKey(ip);
 
-  // 限频检查、计数和消息写入在同一事务内，防止多请求/多进程同时通过检查。
+  // 开放状态、限频检查、计数和消息写入使用同一个事务。
   return transaction(db, () => {
+    if (!isDanmakuSubmissionOpen()) return { ok: false, reason: 'closed' };
     const config = settings ?? getDanmakuSettings();
     const policy = config.rateLimit;
     const cutoff = now - WINDOW_MS;

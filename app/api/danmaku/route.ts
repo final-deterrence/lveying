@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyToken, getTokenFromRequest } from '@/lib/auth';
 import { dataStore } from '@/lib/dataStore';
+import { isDanmakuSubmissionOpen, setDanmakuSubmissionOpen } from '@/lib/danmakuPolicy';
 import type { DanmakuFilter } from '@/types';
 import {
   DANMAKU_CLIENT_COOKIE, DanmakuBodyError, getDanmakuClientId,
@@ -41,9 +42,10 @@ export async function GET(request: Request) {
     if (!['all', 'pending', 'approved', 'rejected'].includes(filter)) {
       return NextResponse.json({ error: '无效的审核状态' }, { status: 400 });
     }
-    return NextResponse.json(dataStore.getDanmakus(page, pageSize, filter as DanmakuFilter), {
-      headers: { 'Cache-Control': 'no-store' },
-    });
+    return NextResponse.json({
+      ...dataStore.getDanmakus(page, pageSize, filter as DanmakuFilter),
+      submissionOpen: isDanmakuSubmissionOpen(),
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     return NextResponse.json(
       { error: '获取弹幕失败' },
@@ -66,17 +68,47 @@ export async function POST(request: Request) {
     });
     return response;
   };
+  const closed = () => NextResponse.json({ error: '弹幕发送暂未开放', submissionOpen: false }, {
+    status: 403,
+    headers: { 'Cache-Control': 'no-store' },
+  });
   try {
+    if (!isDanmakuSubmissionOpen()) return closed();
     const ip = getDanmakuClientIp(request);
     if (!ip) return respond({ error: '暂时无法发送弹幕，请稍后重试' }, 503);
     const content = await readDanmakuContent(request);
     // 有效提交统一确认处理；是否入队、通过或拦截只在后台显示。
-    submitDanmaku(content, ip, clientId);
+    const result = submitDanmaku(content, ip, clientId);
+    if (!result.ok && result.reason === 'closed') return closed();
     return respond({ success: true });
   } catch (error) {
     if (error instanceof DanmakuBodyError) return respond({ error: error.message }, error.status);
     console.error('发送弹幕失败:', error);
     return respond({ error: '发送弹幕失败，请重试' }, 500);
+  }
+}
+
+// PUT - 开放或暂停弹幕发送（需要管理员权限）
+export async function PUT(request: Request) {
+  if (verifyAdmin(request)?.role !== 'admin') {
+    return NextResponse.json({ error: '未授权' }, { status: 401 });
+  }
+
+  try {
+    const body = await request.json();
+    if (typeof body?.submissionOpen !== 'boolean') {
+      return NextResponse.json({ error: '发送状态无效' }, { status: 400 });
+    }
+
+    const { submissionOpen } = body;
+    setDanmakuSubmissionOpen(submissionOpen);
+    return NextResponse.json({ submissionOpen }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return NextResponse.json({ error: '发送状态无效' }, { status: 400 });
+    }
+    console.error('更新弹幕发送状态失败:', error);
+    return NextResponse.json({ error: '更新弹幕发送状态失败，请重试' }, { status: 500 });
   }
 }
 

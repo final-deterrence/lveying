@@ -18,6 +18,9 @@ export default function AdminDanmakuPage() {
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0, totalPages: 1 });
   const [stats, setStats] = useState({ total: 0, approved: 0, pending: 0, rejected: 0 });
   const [error, setError] = useState('');
+  const [submissionOpen, setSubmissionOpen] = useState<boolean | null>(null);
+  const [updatingSubmission, setUpdatingSubmission] = useState(false);
+  const [submissionError, setSubmissionError] = useState('');
   const requestRef = useRef<AbortController | null>(null);
   const router = useRouter();
 
@@ -44,11 +47,12 @@ export default function AdminDanmakuPage() {
       });
       if (response.status === 401) { router.push('/admin'); return; }
       if (!response.ok) throw new Error('获取弹幕失败');
-      const data: DanmakuPage = await response.json();
+      const data: DanmakuPage & { submissionOpen: boolean } = await response.json();
       if (controller.signal.aborted) return;
       setDanmakus(data.danmakus);
       setPagination(data.pagination);
       setStats(data.stats);
+      setSubmissionOpen(data.submissionOpen);
       setPage(data.pagination.page);
       setError('');
     } catch (error) {
@@ -70,6 +74,36 @@ export default function AdminDanmakuPage() {
   }, [fetchDanmakus]);
 
   useEffect(() => { fetchBannedIps(); }, []);
+
+  const updateSubmission = async () => {
+    const token = localStorage.getItem('adminToken');
+    if (!token) {
+      router.replace('/admin');
+      return;
+    }
+
+    setUpdatingSubmission(true);
+    setSubmissionError('');
+    try {
+      const response = await fetch('/api/danmaku', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ submissionOpen: !submissionOpen }),
+      });
+      if (response.status === 401) {
+        router.replace('/admin');
+        return;
+      }
+      if (!response.ok) throw new Error('更新弹幕发送状态失败');
+      const data = await response.json();
+      requestRef.current?.abort();
+      setSubmissionOpen(data.submissionOpen);
+    } catch (error) {
+      setSubmissionError('更新弹幕发送状态失败，请重试');
+    } finally {
+      setUpdatingSubmission(false);
+    }
+  };
 
   const deleteDanmaku = async (id: string) => {
     if (!confirm('确定要删除这条弹幕吗？')) return;
@@ -343,6 +377,26 @@ export default function AdminDanmakuPage() {
               </Link>
             </div>
           </div>
+          {submissionOpen !== null && (
+            <section aria-label="弹幕发送" className="mb-6 rounded-xl border border-white/30 bg-white/50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p role="status" className="font-medium text-gray-800">
+                  {submissionOpen ? '弹幕发送已开放' : '弹幕发送已关闭'}
+                </p>
+                <button
+                  type="button"
+                  onClick={updateSubmission}
+                  disabled={updatingSubmission}
+                  className={`rounded-lg px-4 py-2 font-medium text-white disabled:opacity-50 ${
+                    submissionOpen ? 'bg-gray-600 hover:bg-gray-700' : 'bg-[#743a43] hover:bg-[#633139]'
+                  }`}
+                >
+                  {updatingSubmission ? '提交中…' : submissionOpen ? '暂停发送' : '开放弹幕发送'}
+                </button>
+              </div>
+              {submissionError && <p role="alert" className="mt-2 text-sm text-red-700">{submissionError}</p>}
+            </section>
+          )}
           {showBannedList && (
             <div className="mt-4 p-4 bg-white/10 rounded-xl border border-white/20">
               <div className="flex items-center justify-between mb-3">

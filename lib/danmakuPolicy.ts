@@ -3,6 +3,15 @@ import { getDatabase } from './database';
 
 export class DanmakuSettingsError extends Error {}
 
+export function isDanmakuSubmissionOpen(): boolean {
+  return getDatabase().prepare("SELECT value FROM settings WHERE key = 'danmaku_submission_open'").get()?.value === 'true';
+}
+
+export function setDanmakuSubmissionOpen(open: boolean): void {
+  getDatabase().prepare(`INSERT INTO settings VALUES ('danmaku_submission_open', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(open));
+}
+
 function positiveInteger(value: unknown, name: string, max: number): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > max) {
     throw new DanmakuSettingsError(`${name} 必须是 1 到 ${max} 之间的整数`);

@@ -12,21 +12,14 @@ interface Danmaku {
   censoredAt?: number;
 }
 
-// 替换 placeholder 的候选文案（模块作用域，避免重新创建）
-const PLACEHOLDERS = [
-  '弹幕经审核后将公开展示'
-];
-
 export default function DanmakuPage() {
   const [content, setContent] = useState('');
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState('');
   const [recentDanmakus, setRecentDanmakus] = useState<Danmaku[]>([]);
   const [loading, setLoading] = useState(true);
-  const [placeholder, setPlaceholder] = useState(PLACEHOLDERS[0]);
+  const [submissionOpen, setSubmissionOpen] = useState<boolean | null>(null);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
-
-  // 本地不必重复定义占位句子，使用模块级常量 PLACEHOLDERS
 
   // 获取最近的弹幕
   const fetchRecentDanmakus = useCallback(async (signal?: AbortSignal) => {
@@ -38,6 +31,7 @@ export default function DanmakuPage() {
       // 服务端按审核通过时间返回最近 20 条，包括较晚通过审核的旧消息。
       const sortedDanmakus = (data.danmakus || []).slice(0, 20);
       setRecentDanmakus(sortedDanmakus);
+      setSubmissionOpen(data.submissionOpen === true);
     } catch (error) {
       if (!signal?.aborted) console.error('获取弹幕失败:', error);
     } finally {
@@ -45,21 +39,7 @@ export default function DanmakuPage() {
     }
   }, []);
 
-  const getRandomPlaceholder = useCallback((prev?: string) => {
-    if (PLACEHOLDERS.length === 0) return '';
-    if (PLACEHOLDERS.length === 1) return PLACEHOLDERS[0];
-    let candidate = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)];
-    // 保证不是和上一次一样，尝试最多5次
-    let tries = 0;
-    while (candidate === prev && tries < 5) {
-      candidate = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)];
-      tries += 1;
-    }
-    return candidate;
-  }, []);
-
   useEffect(() => {
-    setPlaceholder(getRandomPlaceholder());
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const controller = new AbortController();
@@ -69,7 +49,7 @@ export default function DanmakuPage() {
     };
     poll();
     return () => { disposed = true; clearTimeout(timer); controller.abort(); };
-  }, [fetchRecentDanmakus, getRandomPlaceholder]);
+  }, [fetchRecentDanmakus]);
 
   // 当弹幕更新时，滚动到底部显示最新弹幕
   useEffect(() => {
@@ -80,7 +60,7 @@ export default function DanmakuPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (sending) return;
+    if (sending || !submissionOpen) return;
     
     if (!content.trim()) {
       setMessage('请输入弹幕内容');
@@ -107,13 +87,13 @@ export default function DanmakuPage() {
       if (response.ok || response.status === 429) {
         setMessage('发送成功！');
         setContent('');
-        // 发送成功后立即刷新弹幕列表
-        setTimeout(() => fetchRecentDanmakus(), 500);
-  // 发送成功后随机更换一次 placeholder
-  setPlaceholder(getRandomPlaceholder(placeholder));
       } else {
         const data = await response.json().catch(() => ({}));
-        setMessage(`${data.error || '发送失败'}`);
+        if (response.status === 403 && data.submissionOpen === false) {
+          setSubmissionOpen(false);
+        } else {
+          setMessage(data.error || '发送失败');
+        }
       }
     } catch (error) {
       setMessage('发送失败，请重试');
@@ -182,37 +162,35 @@ export default function DanmakuPage() {
 
         {/* 下半部分：发送弹幕 */}
         <div className="backdrop-blur-lg bg-white/30 rounded-2xl border border-white/20 shadow-2xl p-4 sm:p-6">
-          <form onSubmit={handleSubmit}>
-            <div className="flex items-center gap-3">
-              <input
-                type="text"
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                onFocus={() => setPlaceholder(getRandomPlaceholder(placeholder))}
-                placeholder={placeholder}
-                maxLength={20}
-                className="min-w-0 flex-1 px-4 py-3 backdrop-blur-md bg-white/80 border-2 border-white/30 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all text-gray-800"
-              />
-              <button
-                type="submit"
-                disabled={sending || !content.trim() || content.trim().length > 20}
-                aria-label="发送弹幕"
-                className="h-12 w-12 shrink-0 sm:h-14 sm:w-14 backdrop-blur-md bg-gradient-to-r from-blue-500/80 to-cyan-500/80 rounded-full shadow-lg border border-white/30 hover:from-blue-600/80 hover:to-cyan-600/80 transform hover:scale-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center"
-              >
-                <Image
-                  src="/send.png"
-                  alt="发送"
-                  width={24}
-                  height={24}
-                  className="drop-shadow-lg"
+          {submissionOpen ? (
+            <form onSubmit={handleSubmit}>
+              <div className="flex items-center gap-3">
+                <input
+                  type="text"
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="弹幕经审核后将公开展示"
+                  aria-label="弹幕内容"
+                  maxLength={20}
+                  className="min-w-0 flex-1 px-4 py-3 backdrop-blur-md bg-white/80 border-2 border-white/30 rounded-full focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all text-gray-800"
                 />
-              </button>
-            </div>
-            {/* 说明：弹幕经审核后将公开展示
-            <p className="mt-2 text-black text-sm text-center w-full">弹幕经审核后将公开展示</p> */}
-          </form>
+                <button
+                  type="submit"
+                  disabled={sending || !content.trim() || content.trim().length > 20}
+                  aria-label="发送弹幕"
+                  className="h-12 w-12 shrink-0 sm:h-14 sm:w-14 backdrop-blur-md bg-gradient-to-r from-blue-500/80 to-cyan-500/80 rounded-full shadow-lg border border-white/30 hover:from-blue-600/80 hover:to-cyan-600/80 transform hover:scale-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center"
+                >
+                  <Image src="/send.png" alt="发送" width={24} height={24} className="drop-shadow-lg" />
+                </button>
+              </div>
+            </form>
+          ) : (
+            <p role="status" className="py-2 text-center font-medium text-gray-700">
+              {submissionOpen === false ? '弹幕发送暂未开放' : loading ? '正在获取弹幕发送状态…' : '暂时无法获取弹幕发送状态'}
+            </p>
+          )}
 
-          {message && (
+          {submissionOpen && message && (
             <div
               className={`mt-4 p-4 rounded-xl text-center font-medium backdrop-blur-md border border-white/30 drop-shadow-md ${
                 message.includes('成功')

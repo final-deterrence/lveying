@@ -14,10 +14,14 @@ function verifyAdmin(request: Request) {
 }
 
 // GET - 获取节目单
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const programs = dataStore.getHierarchicalPrograms();
-    return NextResponse.json({ programs });
+    const isAdmin = verifyAdmin(request)?.role === 'admin';
+    const programs = dataStore.getHierarchicalPrograms(!isAdmin);
+    return NextResponse.json(
+      isAdmin ? { programs, published: dataStore.isProgramSchedulePublished() } : { programs },
+      { headers: { 'Cache-Control': 'no-store', Vary: 'Authorization' } },
+    );
   } catch (error) {
     return NextResponse.json(
       { error: '获取节目单失败' },
